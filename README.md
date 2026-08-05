@@ -60,5 +60,7 @@ Lalu buka code.ipynb dan jalankan sel dari atas ke bawah.
 
 Data dipakai untuk kebutuhan akademik skripsi. Penggunaan lanjutan tetap mengikuti ketentuan sumber data resmi.
 
-
+<p align="center">
+  <i>MADE with ❤️ by Yosia</i>
+</p>
 
