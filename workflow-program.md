@@ -147,32 +147,45 @@ joblib.dump(baseline_models, 'baseline_models.pkl')  # model default + gridsearc
 
 > ℹ️ **Catatan:** proposal 1.3 sebenernya eksplisit menyebutkan fitur "penanda periode Ramadan dan hari besar keagamaan" sebagai bagian dari petunjuk model — tapi berdasarkan keputusan kamu, fitur ini **sengaja tidak diimplementasikan** di workflow ini untuk simplifikasi. Kalau nanti ditanya dosen pembimbing kenapa fitur ini gak ada padahal disebut di proposal, siapin jawaban singkat (misal: dianggap sudah cukup terwakili oleh `month_sin`/`month_cos` dan `seasonal_annual` dari MSTL, atau kompleksitas implementasi kalender Hijriah dianggap di luar prioritas utama penelitian).
 
-Manual pakai pandas (`shift()`/`rolling()`) — bukan library tambahan, biar transparan dan gampang dijelasin. Dibungkus jadi satu fungsi `build_features()` yang dipanggil di step ini DAN di step 13 (rolling forecast) — supaya logic-nya gak pernah ketulis beda antara training vs inference (baca catatan di step 13).
+Pakai `feature-engine` (`pip install feature-engine`) — transformer sklearn-style (`fit()`/`transform()`) buat lag & rolling window features. Alasan pindah dari manual pandas: bukan cuma soal konsistensi train/inference (dibahas di step 13), tapi juga manual pandas rawan `PerformanceWarning: DataFrame is highly fragmented` kalau nambahin banyak kolom satu-satu di loop — `feature-engine` nge-handle ini secara internal jadi gak ganggu.
 
 ```python
-def build_features(df, col):
-    """Satu fungsi feature engineering — dipanggil di step 5 (training)
-    DAN step 13 (inference/rolling forecast), supaya logic shift/rolling
-    gak pernah kepeleset beda antara training vs production."""
-    for lag in [1, 7, 14, 30]:
-        df[f'{col}_lag{lag}'] = df[f'{col}_residual'].shift(lag)
-    for window in [7, 30]:
-        # shift(1) DULU sebelum rolling — biar window gak include hari ini
-        # sendiri (kalau enggak, ini data leakage: pakai info hari ini buat
-        # bikin fitur yang mprediksi target hari ini juga)
-        df[f'{col}_roll_mean{window}'] = df[f'{col}_residual'].shift(1).rolling(window).mean()
-        df[f'{col}_roll_std{window}'] = df[f'{col}_residual'].shift(1).rolling(window).std()
-    return df
+from feature_engine.timeseries.forecasting import LagFeatures, WindowFeatures
+import joblib
+
+feature_transformers = {}  # simpan 1 pasang transformer per komoditas
 
 for col in commodity_cols:
-    df = build_features(df, col)
+    lag_transformer = LagFeatures(
+        variables=[f'{col}_residual'],
+        periods=[1, 7, 14, 30],
+    )
+    window_transformer = WindowFeatures(
+        variables=[f'{col}_residual'],
+        window=[7, 30],
+        functions=['mean', 'std'],
+    )
+    # WindowFeatures secara default udah nge-shift(1) dulu sebelum rolling
+    # (gak include baris hari ini sendiri) — jadi gak perlu mikirin manual
+    # shift(1) kayak versi pandas polos, ini udah dihandle bawaan library-nya
+
+    df = lag_transformer.fit_transform(df)
+    df = window_transformer.fit_transform(df)
+
+    feature_transformers[col] = {'lag': lag_transformer, 'window': window_transformer}
 
 # fitur kalender — cyclical encoding biar Desember & Januari "keliatan deket"
-# ke model (bukan dianggap beda jauh kayak encoding angka biasa 12 vs 1)
+# ke model (bukan dianggap beda jauh kayak encoding angka biasa 12 vs 1),
+# ini tetep manual, gak perlu library tambahan buat hal sesimpel ini
 df['day_of_week'] = df['tanggal'].dt.dayofweek
 df['month_sin'] = np.sin(2*np.pi*df['tanggal'].dt.month/12)
 df['month_cos'] = np.cos(2*np.pi*df['tanggal'].dt.month/12)
+
+# simpan transformer-nya — WAJIB, dipakai lagi di step 13 biar konsisten
+joblib.dump(feature_transformers, 'feature_transformers.pkl')
 ```
+
+**Nama kolom hasil transform beda format dari manual:** `LagFeatures`/`WindowFeatures` otomatis kasih nama kolom baru (misal `{col}_residual_lag_1`, `{col}_residual_window_7_mean`), bukan `{col}_lag1`/`{col}_roll_mean7`. Cek `df.columns` abis transform buat mastiin nama persisnya sebelum dipakai di `feature_cols_for(col)` (step 6 dst).
 
 ---
 
@@ -190,31 +203,121 @@ for col in commodity_cols:
 
 ---
 
-## 7. GA Hyperparameter Optimization
+## 7. GA Hyperparameter Optimization — `pygad`
 
-Fitness function pakai **10-Fold Cross-Validation** untuk cari kombinasi `num_leaves`, `max_depth`, `learning_rate`, `min_child_samples`, `subsample` terbaik. Proposal 1.3 sudah secara eksplisit menetapkan K-Fold CV untuk tahap pencarian GA ini (terpisah dari Time Series Split yang dipakai khusus untuk evaluasi model final di step 9) — jadi ini **bukan lagi item diskusi terbuka ke dosen pembimbing**, sudah jadi keputusan desain yang tertulis di proposal. Cukup dicatat di BAB 4/keterbatasan kalau memang masih relevan untuk dibahas potensi data leakage-nya secara teoretis.
+Fitness function pakai **10-Fold Cross-Validation** untuk cari kombinasi hyperparameter LightGBM terbaik. Proposal 1.3 sudah secara eksplisit menetapkan K-Fold CV untuk tahap pencarian GA ini (terpisah dari Time Series Split yang dipakai khusus untuk evaluasi model final di step 9-10) — jadi ini **bukan lagi item diskusi terbuka ke dosen pembimbing**, sudah jadi keputusan desain yang tertulis di proposal.
+
+Dipilih `pygad` (bukan `deap`) — API-nya jauh lebih ringkas buat kasus hyperparameter search kayak ini, gak butuh boilerplate `Toolbox`/`creator` manual kayak `deap`. Sebelas hyperparameter dicari sekaligus: `num_leaves`, `learning_rate`, `max_depth`, `n_estimators`, `min_child_samples`, `subsample`, `colsample_bytree`, `min_child_weight`, `reg_alpha`, `reg_lambda`, `min_split_gain` — `bagging_freq` di-fixed (bukan gene GA) karena `subsample` gak akan efektif tanpa itu.
+
+> ⚠️ **Hindari pasangan alias di LightGBM:** `min_child_samples`≡`min_data_in_leaf` dan `min_child_weight`≡`min_sum_hessian_in_leaf` itu literally parameter yang sama dengan nama beda — jangan masukin dua-duanya sebagai gene terpisah, buang-buang dimensi search space GA. Yang dipakai di sini cuma salah satu dari tiap pasangan.
 
 ```python
 import lightgbm as lgb
 from sklearn.model_selection import KFold
 import numpy as np
+import pygad
 
 def fitness_function(params, X, y):
     kf = KFold(n_splits=10, shuffle=True, random_state=42)
     rmses = []
     for train_idx, val_idx in kf.split(X):
-        model = lgb.LGBMRegressor(**params)
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
-        pred = model.predict(X.iloc[val_idx])
-        rmse = np.sqrt(np.mean((y.iloc[val_idx] - pred) ** 2))
-        rmses.append(rmse)
-    return np.mean(rmses)  # ini yang GA minimalkan
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-# Jalankan GA (pakai library deap atau pygad) — populasi → seleksi →
-# crossover → mutasi, ulangi per komoditas × per horizon (27 proses pencarian,
-# sesuai proposal 1.4: "Pencarian dilakukan untuk setiap pasangan komoditas
-# dan jangka waktu, sehingga menghasilkan 27 proses pencarian")
+        model = lgb.LGBMRegressor(**params)
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            callbacks=[lgb.early_stopping(stopping_rounds=20, verbose=False)],
+        )  # early stopping — n_estimators gede di gene_space gak selalu kepake penuh,
+           # LightGBM berhenti sendiri kalau 20 iterasi berturut gak improve
+
+        pred = model.predict(X_val)
+        rmses.append(np.sqrt(np.mean((y_val - pred) ** 2)))
+    return np.mean(rmses)  # ini yang mau diminimalkan
+
+
+def fitness_func_pygad(ga_instance, solution, solution_idx):
+    params = {
+        "num_leaves": int(solution[0]),
+        "learning_rate": solution[1],
+        "max_depth": int(solution[2]),
+        "n_estimators": int(solution[3]),
+        "min_child_samples": int(solution[4]),
+        "subsample": solution[5],
+        "colsample_bytree": solution[6],
+        "min_child_weight": solution[7],
+        "reg_alpha": solution[8],
+        "reg_lambda": solution[9],
+        "min_split_gain": solution[10],
+        "bagging_freq": 1,   # fixed, bukan gene — wajib biar subsample beneran aktif
+    }
+    return -fitness_function(params, X, y)   # dikali -1: pygad maximize, kita mau minimize RMSE
+
+
+def run_ga_for(X, y):
+    ga_instance = pygad.GA(
+        num_generations=30,
+        num_parents_mating=15,
+        sol_per_pop=40,
+        fitness_func=fitness_func_pygad,
+        num_genes=11,
+        mutation_percent_genes=[20, 5],   # list 2 elemen — wajib karena mutation_type="adaptive"
+                                            # [rate solusi jelek, rate solusi bagus]
+        gene_space=[
+            {"low": 20, "high": 1000},     # num_leaves
+            {"low": 0.001, "high": 0.5},   # learning_rate
+            {"low": 3, "high": 15},        # max_depth
+            {"low": 50, "high": 1000},     # n_estimators
+            {"low": 1, "high": 100},       # min_child_samples
+            {"low": 0.5, "high": 1.0},     # subsample
+            {"low": 0.5, "high": 1.0},     # colsample_bytree
+            {"low": 1e-6, "high": 10.0},   # min_child_weight
+            {"low": 0.0, "high": 10.0},    # reg_alpha
+            {"low": 0.0, "high": 10.0},    # reg_lambda
+            {"low": 0.0, "high": 1.0},     # min_split_gain
+        ],
+        gene_type=float,
+        parent_selection_type="tournament",
+        K_tournament=5,
+        crossover_type="single_point",
+        crossover_probability=0.9,
+        mutation_type="adaptive",
+        keep_elitism=1,
+    )
+    ga_instance.run()
+    best_solution, best_fitness, _ = ga_instance.best_solution()
+    return best_solution, ga_instance
+
+
+# Jalankan per komoditas × per horizon (27 proses pencarian, sesuai proposal 1.4:
+# "Pencarian dilakukan untuk setiap pasangan komoditas dan jangka waktu, sehingga
+# menghasilkan 27 proses pencarian")
+best_params_from_GA = {}
+for col in commodity_cols:
+    best_params_from_GA[col] = {}
+    for h in horizons:
+        X = df[feature_cols_for(col)].dropna()
+        y = df.loc[X.index, f'{col}_target_h{h}']
+        best_solution, ga_instance = run_ga_for(X, y)
+
+        best_params_from_GA[col][h] = {
+            "num_leaves": int(best_solution[0]),
+            "learning_rate": best_solution[1],
+            "max_depth": int(best_solution[2]),
+            "n_estimators": int(best_solution[3]),
+            "min_child_samples": int(best_solution[4]),
+            "subsample": best_solution[5],
+            "colsample_bytree": best_solution[6],
+            "min_child_weight": best_solution[7],
+            "reg_alpha": best_solution[8],
+            "reg_lambda": best_solution[9],
+            "min_split_gain": best_solution[10],
+            "bagging_freq": 1,
+        }
 ```
+
+**Kenapa `n_estimators`/`num_leaves` range-nya masih lumayan lebar (bukan yang udah dikecilin sebelumnya):** ini keputusan trade-off eksplorasi vs biaya komputasi — dengan `sol_per_pop=40` × `num_generations=30` × 10-fold CV × 27 kombinasi, itu udah lumayan berat (ratusan ribu kali training). Kalau ternyata kelamaan di eksekusi beneran, turunin `sol_per_pop`/`num_generations` dulu (bukan range gene_space-nya) — biar ruang pencariannya tetap representatif, cuma budget evaluasinya yang dikurangin.
 
 ---
 
@@ -395,10 +498,11 @@ def hitung_ews(df_bulanan, col, model_h30, threshold_z=1.5):
 ```python
 import joblib
 
+# Load transformer yang SAMA PERSIS dipakai pas training (step 5) — ini
+# yang bikin rolling forecast konsisten, gak perlu nulis ulang logic manual
+feature_transformers = joblib.load('feature_transformers.pkl')
 trend_models = joblib.load('trend_models.pkl')
 
-# Rolling one-step forecast — AMAN karena lag features selalu dari data AKTUAL,
-# bukan dari prediksi model sebelumnya (beda dengan recursive forecasting)
 def rolling_forecast_h1(model_h1, col, df_history, tanggal_baru, harga_aktual_baru):
     # 1) data baru masuk sebagai OBSERVASI AKTUAL, bukan hasil prediksi
     df_history.loc[len(df_history)] = {'tanggal': tanggal_baru, col: harga_aktual_baru}
@@ -408,10 +512,13 @@ def rolling_forecast_h1(model_h1, col, df_history, tanggal_baru, harga_aktual_ba
     trend_baru = trend_models[col].predict([[time_idx_baru]])[0]
     df_history.loc[df_history.index[-1], f'{col}_residual'] = harga_aktual_baru - trend_baru
 
-    # 3) pakai FUNGSI YANG SAMA PERSIS dari step 5 (build_features), bukan
-    #    ditulis ulang manual di sini — ini yang jaga konsistensi shift()/
-    #    rolling() antara training vs inference, tanpa perlu library tambahan
-    df_history = build_features(df_history, col)
+    # 3) transform pakai transformer yang SAMA dari step 5 (bukan ditulis
+    #    ulang manual) — konsistensi dijamin karena objectnya literally
+    #    sama, bukan cuma "logic yang mirip"
+    lag_tf = feature_transformers[col]['lag']
+    window_tf = feature_transformers[col]['window']
+    df_history = lag_tf.transform(df_history)
+    df_history = window_tf.transform(df_history)
 
     features = df_history[feature_cols_for(col)].iloc[[-1]]
 
@@ -423,14 +530,14 @@ def rolling_forecast_h1(model_h1, col, df_history, tanggal_baru, harga_aktual_ba
     return pred_harga
 
 # Pola yang sama berlaku untuk model H+7 dan H+30 — bedanya cuma target
-# kolom yang diprediksi, mekanismenya (recompute feature pakai build_features
-# yang sama, tanpa retrain) identik untuk ketiga horizon.
+# kolom yang diprediksi, mekanismenya (transform pakai transformer yang sama
+# dari step 5, tanpa retrain) identik untuk ketiga horizon.
 ```
 
 **Dua pitfall yang wajib disebut di BAB 4 (keterbatasan):**
 
 1. **Trend extrapolation drift.** `trend_models` (step 4) itu model `LinearRegression` yang di-fit di atas trend hasil MSTL, bukan trend mentah — tapi sifat ekstrapolasinya tetap sama: makin jauh rolling forecast berjalan dari akhir periode training, makin jauh pula ekstrapolasi linear-nya dari range yang pernah dilihat model, akurasi trend component berpotensi menurun kalau model gak pernah di-refresh. Karena proposal 1.4 eksplisit menyatakan tidak ada retraining otomatis/terjadwal, ini jadi asumsi yang harus dinyatakan eksplisit: rolling forecast valid untuk horizon deployment yang tidak terlalu jauh dari akhir data training, pembaruan model dilakukan manual (sesuai proposal).
-2. **Konsistensi feature pipeline.** Fungsi `build_features()` di step 5 dan step 13 harus BENERAN fungsi yang sama (di-import/reuse, bukan copy-paste ke file lain) — kalau kamu kerja di notebook terpisah buat deployment, pastiin `build_features` didefinisiin di satu file/module yang di-import di kedua tempat, jangan retype manual. Ini sumber leakage paling sering kejadian di praktik, bukan soal "rolling"-nya itu sendiri.
+2. ~~Konsistensi feature pipeline manual~~ — **udah gak jadi masalah** sejak pindah ke `feature-engine` di step 5: `feature_transformers[col]` yang di-load di sini itu **object yang sama persis** yang di-`fit()` pas training, bukan fungsi ditulis ulang. Risiko logic `shift()`/`rolling()` beda antara training vs production otomatis hilang.
 
 ---
 
@@ -441,9 +548,9 @@ def rolling_forecast_h1(model_h1, col, df_history, tanggal_baru, harga_aktual_ba
 2.  Interpolasi missing value (time-based, ISI bukan drop) → tetap 2.039 baris
 3.  ADF test per komoditas
 4.  Detrend via MSTL decomposition (periods=(7, 365): weekly + annual) → fit LinearRegression di atas trend MSTL untuk ekstrapolasi → simpan trend_models
-5.  Feature engineering di level residual pakai fungsi `build_features()` (lag, rolling, cyclical) — reusable, dipakai lagi di step 13
+5.  Feature engineering di level residual pakai `feature-engine` (LagFeatures/WindowFeatures + cyclical calendar) → simpan feature_transformers
 6.  Setup target per horizon (H+1, H+7, H+30) — direct, bukan recursive
-7.  GA optimasi hyperparameter (fitness = 10-Fold CV RMSE) — 27 proses pencarian
+7.  GA optimasi hyperparameter pakai `pygad` (fitness = 10-Fold CV RMSE + early stopping) — 27 proses pencarian, 11 hyperparameter
 8.  Training model final GA-LightGBM per komoditas × horizon (27 model)
 9.  Training 3 model pembanding: naive, LightGBM default, LightGBM grid/manual search
 10. Evaluasi (MAE/RMSE/R²/MAPE) walk-forward expanding window, 4 model dibandingkan
