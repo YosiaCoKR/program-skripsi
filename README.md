@@ -1,66 +1,105 @@
 # Program Skripsi
 
-## Definisi Proyek
+Monorepo penelitian dan aplikasi PANGANIA untuk prediksi harga komoditas
+pangan di Provinsi DIY. Penelitian menggunakan data time series harian untuk
+beras, bawang merah, dan cabai rawit dengan total sembilan komoditas.
 
-Proyek ini adalah penelitian prediksi harga komoditas pangan di Provinsi DIY berbasis data time series harian. Fokus utama proyek ada pada pembersihan data, pemodelan prediksi harga jangka pendek, dan optimasi parameter model agar hasil prediksi lebih stabil dan akurat.
+## Struktur
 
-Komoditas yang dianalisis mencakup kelompok beras, bawang merah, dan cabai rawit dengan total 9 variabel harga.
+```text
+program-skripsi/
+├── webapp/
+│   ├── research/              # notebook, dataset, dan artefak model
+│   ├── backend/               # FastAPI + SQLAlchemy + SQLite
+│   └── frontend/              # React 18 + TypeScript + Vite
+├── package.json               # workspace dan command dari root
+├── PRD.md                     # kebutuhan produk
+└── workflow-program.md        # alur penelitian
+```
 
-## Tech Stack
+## Menjalankan
 
-- Python
-- Jupyter Notebook
-- Pandas dan NumPy untuk olah data
-- Seaborn dan Matplotlib untuk visualisasi
-- Scikit-learn untuk utilitas machine learning
-- Statsmodels untuk analisis time series statistik
-- LightGBM sebagai model regresi utama
-- Genetic Algorithm (planned) untuk optimasi hyperparameter
+Install dependency frontend dari root:
 
-## Ringkasan Data
+```bash
+npm install
+npm run frontend:typecheck
+npm run frontend:build
+```
+
+Jalankan backend dan frontend di dua terminal:
+
+```bash
+python -m pip install -r webapp/backend/requirements.txt
+npm run backend:dev
+```
+
+```bash
+npm run frontend:dev
+```
+
+Buka `http://127.0.0.1:5173`. Dokumentasi API tersedia di
+
+
+Untuk mengisi database pertama kali:
+
+```bash
+cd webapp/backend
+../../.venv/Scripts/python.exe -m pangania.seed --reset
+```
+
+## Penelitian
+
+Semua kode dan resource penelitian berada di `webapp/research/`:
+
+- `code.ipynb`: eksplorasi data, preprocessing, dan training model
+- `DATASET-BERAS.csv`: dataset harga harian, 2.038 tanggal dan 9 komoditas
+- `trend_models.pkl`: artefak model trend
+- `features_transformers.pkl`: transformer fitur
+- `stl_results.pkl`: hasil dekomposisi STL
+
+Jalankan notebook dengan working directory `webapp/research/` agar path relatif
+dataset dan artefak tetap bekerja. Tech stack penelitian meliputi Python,
+Jupyter, Pandas, NumPy, Scikit-learn, Statsmodels, LightGBM, Seaborn, dan
+Matplotlib.
+
+## Model Aplikasi
+
+Aplikasi hanya melakukan inference. Model hasil training disimpan di
+`webapp/backend/artifacts/models/` dengan format:
+
+```text
+{algoritma}__{kode-komoditas}__h{horizon}.pkl
+```
+
+Contoh:
+
+```text
+ga_lightgbm__cabai-rawit-merah__h1.pkl
+```
+
+Daftarkan model dari folder backend:
+
+```bash
+cd webapp/backend
+python -m pangania.register_models --dry-run
+python -m pangania.register_models
+```
+
+Model wajib menggunakan fitur residual MSTL yang sama dengan notebook. Backend
+membaca dataset dan artefak penelitian melalui `pangania.config`, sehingga
+training dan inference memakai resource yang konsisten.
+
+## Akun Pengembangan
 
 | Item | Nilai |
 | --- | --- |
-| Nama file | DATASET-BERAS.csv |
-| Jumlah baris | 2038 |
-| Jumlah kolom | 10 |
-| Rentang tanggal | 2021-01-04 sampai 2026-08-03 |
-| Jumlah fitur komoditas | 9 |
+| Login admin | `admin@pangania.id` |
+| Kata sandi | `pangania2026` |
+| Port backend | `8010` |
+| Port frontend | `5173` |
 
-Keterangan kolom komoditas:
-
-- Beras Kualitas Bawah I
-- Beras Kualitas Bawah II
-- Beras Kualitas Medium I
-- Beras Kualitas Medium II
-- Beras Kualitas Super I
-- Beras Kualitas Super II
-- Bawang Merah Ukuran Sedang
-- Cabai Rawit Hijau
-- Cabai Rawit Merah
-
-## Isi Workspace
-
-- code.ipynb: proses eksplorasi data dan preprocessing
-- DATASET-BERAS.csv: data harga harian
-- workflow-program.md: rancangan alur metodologi penelitian
-- README.md: dokumentasi proyek
-
-## Cara Pakai Singkat
-
-Install dependency:
-
-```bash
-pip install numpy pandas seaborn matplotlib scikit-learn statsmodels lightgbm
-```
-
-Lalu buka code.ipynb dan jalankan sel dari atas ke bawah.
-
-## Catatan
-
-Data dipakai untuk kebutuhan akademik skripsi. Penggunaan lanjutan tetap mengikuti ketentuan sumber data resmi.
-
-<p align="center">
-  <i>MADE with ❤️ by Yosia</i>
-</p>
+Ganti kredensial dan `PANGANIA_SECRET_KEY` melalui environment variable sebelum
+deployment. Data digunakan untuk kebutuhan akademik skripsi dan penggunaan
+lanjutan tetap mengikuti ketentuan sumber data resmi.
 

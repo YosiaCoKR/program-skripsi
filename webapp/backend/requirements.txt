@@ -1,0 +1,16 @@
+# Lapisan web
+fastapi>=0.115
+uvicorn[standard]>=0.32
+sqlalchemy>=2.0
+pydantic>=2.9
+python-multipart>=0.0.9
+
+# Lapisan ML — versi harus cocok dengan lingkungan yang dipakai saat
+# melatih model, karena artefak .pkl dimuat sebagai objek Python.
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+lightgbm>=4.5
+feature-engine>=1.8
+statsmodels>=0.14
+joblib>=1.4
