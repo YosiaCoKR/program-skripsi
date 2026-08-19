@@ -1,12 +1,24 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../../lib/api";
-import { commodityColor, statusStyle } from "../../lib/palette";
-import { directionClass, directionOf, formatMonth, formatNumber, formatPercent } from "../../lib/format";
+import { useState } from "react";
 import { ErrorState, Loading, Notice, StatusBadge } from "../../components/ui";
+import { api } from "../../lib/api";
+import {
+  directionClass,
+  directionOf,
+  formatMonth,
+  formatNumber,
+  formatPercent,
+} from "../../lib/format";
+import { commodityColor, statusStyle } from "../../lib/palette";
 import type { AlertLevel, EwsItem, EwsResponse } from "../../lib/types";
 
-const LEVEL_ORDER: AlertLevel[] = ["kritis", "warning", "waspada", "normal", "tidak_tersedia"];
+const LEVEL_ORDER: AlertLevel[] = [
+  "kritis",
+  "warning",
+  "waspada",
+  "normal",
+  "tidak_tersedia",
+];
 
 export function EwsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -17,11 +29,14 @@ export function EwsPage() {
   });
 
   if (ews.isLoading) return <Loading />;
-  if (ews.isError) return <ErrorState error={ews.error} onRetry={() => ews.refetch()} />;
+  if (ews.isError)
+    return <ErrorState error={ews.error} onRetry={() => ews.refetch()} />;
   if (!ews.data) return null;
 
   const counts = LEVEL_ORDER.reduce<Record<string, number>>((acc, level) => {
-    acc[level] = ews.data.items.filter((item) => item.latest?.level === level).length;
+    acc[level] = ews.data.items.filter(
+      (item) => item.latest?.level === level,
+    ).length;
     return acc;
   }, {});
 
@@ -31,25 +46,32 @@ export function EwsPage() {
         <span className="eyebrow">Sistem peringatan dini</span>
         <h1 className="page-title">Peringatan Dini Bulanan</h1>
         <p className="lede">
-          Perbandingan perubahan harga bulanan realisasi terhadap prediksi H+30, disertai
-          z-score terhadap pola historis. Ambang batas dapat disesuaikan oleh admin.
+          Perbandingan perubahan harga bulanan realisasi terhadap prediksi H+30,
+          disertai z-score terhadap pola historis. Ambang batas dapat
+          disesuaikan oleh admin.
         </p>
       </header>
 
       {!ews.data.has_prediction_component ? (
-        <Notice tone="warning" title="Komponen perbandingan prediksi belum aktif">
+        <Notice
+          tone="warning"
+          title="Komponen perbandingan prediksi belum aktif"
+        >
           {ews.data.note}
         </Notice>
       ) : null}
 
-      <section className="row-wrap" style={{ gap: "var(--space-3)" }}>
+      <section className="ews-summary-grid">
         {LEVEL_ORDER.map((level) => {
           const style = statusStyle(level);
           return (
-            <div key={level} className="card" style={{ padding: "var(--space-3) var(--space-4)", minWidth: 150 }}>
+            <div key={level} className="card ews-summary-card">
               <div className="stack-2">
                 <StatusBadge level={level} />
-                <div className="num" style={{ fontSize: "var(--text-xl)", fontWeight: 600 }}>
+                <div
+                  className="num"
+                  style={{ fontSize: "var(--text-xl)", fontWeight: 600 }}
+                >
                   {counts[level] ?? 0}
                 </div>
                 <span className="xs muted">{style.description}</span>
@@ -69,7 +91,7 @@ export function EwsPage() {
               expanded={expanded === item.commodity.code}
               onToggle={() =>
                 setExpanded((current) =>
-                  current === item.commodity.code ? null : item.commodity.code
+                  current === item.commodity.code ? null : item.commodity.code,
                 )
               }
             />
@@ -78,9 +100,9 @@ export function EwsPage() {
       </section>
 
       <p className="xs muted" style={{ maxWidth: "76ch" }}>
-        Status bersifat indikatif dan bukan keputusan kebijakan. Peringatan hanya
-        ditampilkan secara visual di dalam aplikasi — tidak ada notifikasi keluar berupa
-        email, pesan singkat, maupun push notification.
+        Status bersifat indikatif dan bukan keputusan kebijakan. Peringatan
+        hanya ditampilkan secara visual di dalam aplikasi — tidak ada notifikasi
+        keluar berupa email, pesan singkat, maupun push notification.
       </p>
     </div>
   );
@@ -112,8 +134,11 @@ function CommodityEwsRow({
           textAlign: "left",
         }}
       >
-        <div className="row-between">
-          <div className="row" style={{ gap: "var(--space-3)" }}>
+        <div className="row-between ews-row-head">
+          <div
+            className="row ews-row-commodity"
+            style={{ gap: "var(--space-3)" }}
+          >
             <span
               aria-hidden="true"
               style={{
@@ -127,13 +152,17 @@ function CommodityEwsRow({
             <div className="stack-1">
               <span style={{ fontWeight: 600 }}>{item.commodity.name}</span>
               <span className="xs muted">
-                Periode terakhir: {latest ? formatMonth(latest.period_month) : "—"}
+                Periode terakhir:{" "}
+                {latest ? formatMonth(latest.period_month) : "—"}
               </span>
             </div>
           </div>
 
-          <div className="row-wrap" style={{ gap: "var(--space-5)" }}>
-            <div className="stack-1" style={{ textAlign: "right" }}>
+          <div
+            className="row-wrap ews-row-stats"
+            style={{ gap: "var(--space-5)" }}
+          >
+            <div className="stack-1 ews-stat">
               <span className="eyebrow">Realisasi MoM</span>
               <span
                 className={`num small ${directionClass(directionOf(latest?.actual_pct_mom))}`}
@@ -142,7 +171,7 @@ function CommodityEwsRow({
                 {formatPercent(latest?.actual_pct_mom, 2, true)}
               </span>
             </div>
-            <div className="stack-1" style={{ textAlign: "right" }}>
+            <div className="stack-1 ews-stat">
               <span className="eyebrow">Z-score</span>
               <span className="num small" style={{ fontWeight: 600 }}>
                 {formatNumber(latest?.z_score, 2)}
@@ -154,10 +183,20 @@ function CommodityEwsRow({
       </button>
 
       {expanded ? (
-        <div style={{ borderTop: "1px solid var(--rule)", padding: "var(--space-4)" }}>
+        <div
+          style={{
+            borderTop: "1px solid var(--rule)",
+            padding: "var(--space-4)",
+          }}
+        >
           <div className="stack-3">
-            <div className="row-wrap xs muted" style={{ gap: "var(--space-4)" }}>
-              <span>Ambang waspada: z &gt; {item.thresholds.threshold_waspada}</span>
+            <div
+              className="row-wrap xs muted ews-thresholds"
+              style={{ gap: "var(--space-4)" }}
+            >
+              <span>
+                Ambang waspada: z &gt; {item.thresholds.threshold_waspada}
+              </span>
               <span>Warning: z &gt; {item.thresholds.threshold_warning}</span>
               <span>Kritis: z &gt; {item.thresholds.threshold_kritis}</span>
             </div>
@@ -178,7 +217,9 @@ function CommodityEwsRow({
                   {[...item.rows].reverse().map((row) => (
                     <tr key={row.period_month}>
                       <td className="num">{formatMonth(row.period_month)}</td>
-                      <td className={`num right ${directionClass(directionOf(row.actual_pct_mom))}`}>
+                      <td
+                        className={`num right ${directionClass(directionOf(row.actual_pct_mom))}`}
+                      >
                         {formatPercent(row.actual_pct_mom, 2, true)}
                       </td>
                       <td className="num right">
@@ -189,9 +230,13 @@ function CommodityEwsRow({
                         )}
                       </td>
                       <td className="num right">
-                        {row.deviation != null ? formatPercent(row.deviation, 2, true) : "—"}
+                        {row.deviation != null
+                          ? formatPercent(row.deviation, 2, true)
+                          : "—"}
                       </td>
-                      <td className="num right">{formatNumber(row.z_score, 2)}</td>
+                      <td className="num right">
+                        {formatNumber(row.z_score, 2)}
+                      </td>
                       <td>
                         <StatusBadge level={row.level} />
                       </td>
