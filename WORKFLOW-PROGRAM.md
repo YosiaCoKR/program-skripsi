@@ -8,13 +8,12 @@
 
 ## 0. Ringkasan Sistem
 
-Penelitian ini punya **3 output berbeda** yang saling terhubung, jangan dikerjain sebagai satu model tunggal:
+Penelitian ini punya **2 output berbeda** yang saling terhubung, jangan dikerjain sebagai satu model tunggal:
 
 | Output                 | Horizon              | Metode                           | Sifat                              | Status vs proposal |
 |------------------------|-----------------------|-----------------------------------|-------------------------------------|----------------------|
 | Prediksi harga presisi | 1 hari, 7 hari, 30 hari | GA-LightGBM (27 model)          | Nilai eksak (Rp/kg)                | Ada di proposal (RQ, tujuan, modul) |
-| Proyeksi laju kenaikan | 2-3 tahun             | **Holt's linear trend** / ETS(A,A,N) — 9 model | Laju %/tahun + interval prediksi 95%, bukan nilai eksak | Disebut di Manfaat (1.5) & SDG (1.7) sebagai manfaat kualitatif buat petani, belum diformalkan jadi modul/tujuan teknis terpisah |
-| Early warning system   | Bulanan               | Bandingkan **prediksi H+30 vs realisasi aktual** + ambang batas | Deteksi anomali | Ada di proposal (RQ #4, modul, fitur app) |
+| Early warning system   | Bulanan               | Persentase selisih **prediksi H+30 vs harga hari ini** + ambang tetap | Peringatan dini menghadap ke depan | Ada di proposal (RQ #4, modul, fitur app) |
 
 **Dataset:** Data harian harga 9 komoditas DIY dari Bank Indonesia (PIHPS), **4 Jan 2021 – 3 Agu 2026**, **2.038 baris × 10 kolom** (tanggal + 9 komoditas). 611 tanggal (**29,98%**) tidak memiliki data karena pasar tidak disurvei di akhir pekan/hari libur — **tanggal ini DIISI (interpolasi), bukan di-drop**, supaya jarak antarbaris tetap seragam. Jumlah baris final setelah preprocessing tetap **2.038 baris** (bukan berkurang).
 
@@ -23,6 +22,31 @@ Penelitian ini punya **3 output berbeda** yang saling terhubung, jangan dikerjai
 > ⚠️ **Ikutan yang harus dikoreksi:** BAB I proposal masih menulis 2.039 baris / 612 tanggal / 30,0%. Angka itu perlu diperbaiki juga supaya konsisten. BAB II sudah memakai angka yang benar.
 
 **9 komoditas (univariat, tiap komoditas diperlakukan terpisah):** Beras Kualitas Bawah I & II, Medium I & II, Super I & II, Bawang Merah Ukuran Sedang, Cabai Rawit Hijau & Merah. Setiap komoditas diramal murni dari riwayat harganya sendiri (tanpa fitur komoditas lain).
+
+---
+
+## 0.1 Keputusan Terbaru (30 Agustus 2026)
+
+Empat perubahan ruang lingkup. Bagian-bagian di bawah sudah disesuaikan; yang belum beres ditandai eksplisit.
+
+| # | Keputusan | Dampak |
+|---|---|---|
+| 1 | **Holt / ETS(A,A,N) dibuang** — step 11 dibatalkan | Luaran final tinggal **27 model GA-LightGBM + EWS bulanan** |
+| 2 | **`trend_models` (LinearRegression) jadi satu-satunya model tren** | Tabel "dua model trend" di step 4 disederhanakan |
+| 3 | **EWS disederhanakan** jadi selisih persentase, ambang tetap | Tanpa z-score, tanpa threshold configurable, **stateless** |
+| 4 | **PACF & Ljung-Box = diagnostik BAB IV**, bukan bagian pipeline | Skripnya sudah ada di `webapp/research/`, tinggal dijalankan |
+
+**MSTL TETAP WAJIB.** Ini yang paling sering salah paham: Holt itu *konsumen* output MSTL (di-fit di atas deret terdeseasonalisasi), bukan alasan keberadaannya. Setelah Holt dibuang, MSTL tetap menyuplai step 5, 6, 8, 10, 12, dan 13 — dan justru makin krusial, karena `trend_models` jadi satu-satunya yang bisa mengekstrapolasi tren ke tanggal masa depan. Tanpa itu, keluaran 27 model berhenti sebagai residual (~0,05) dan tidak pernah jadi rupiah.
+
+**Sisa pekerjaan administratif:**
+
+| Item | Status |
+|---|---|
+| Proposal **1.5** (Manfaat poin 2 — proyeksi laju kenaikan) | ✅ sudah dihapus |
+| Proposal **1.7** (SDG 12) | ⬜ belum — arahkan framing-nya ke EWS bulanan |
+| Tabel `projections` + `services/projections.py` di backend | ⬜ yatim, perlu dibersihkan |
+| Tabel `predictions`, `ews_alerts`, `ews_settings` | ⬜ tidak terpakai lagi oleh EWS versi baru |
+
 
 ---
 
@@ -83,20 +107,21 @@ for col in commodity_cols:
 
 ---
 
-## 4. Detrend — MSTL Decomposition (Multi-Seasonal) + Dua Model Trend
+## 4. Detrend — MSTL Decomposition (Multi-Seasonal) + Model Trend
 
 **Kenapa MSTL, bukan STL single-period atau `LinearRegression` polos:** harga komoditas pangan gak bergerak sebagai garis lurus sepanjang 5 tahun, dan punya lebih dari satu pola musiman sekaligus — pola mingguan pasar DAN pola musiman tahunan (panen raya, Ramadan, El Niño/La Niña, musim wisatawan — semua disebut eksplisit di latar belakang proposal 1.1). `MSTL` (`statsmodels.tsa.seasonal.MSTL`) memisahkan trend + **beberapa** seasonal component sekaligus (`periods=(7, 365)`) + residual, jadi gak perlu milih salah satu antara weekly atau annual.
 
-> ⚠️ **Catatan penting:** MSTL, kayak STL, itu alat *decomposition*, bukan model forecasting — gak bisa `.predict()` ke `time_idx` masa depan. Karena step 11 (proyeksi 2-3 tahun) dan step 13 (rolling forecast) butuh ekstrapolasi ke depan, kita fit model tambahan di atas hasil MSTL.
+> ⚠️ **Catatan penting:** MSTL, kayak STL, itu alat *decomposition*, bukan model forecasting — gak bisa `.predict()` ke `time_idx` masa depan. Karena step 12 (EWS) dan step 13 (rolling forecast) butuh ekstrapolasi ke depan, kita fit satu model tambahan di atas hasil MSTL.
 >
-> **Ada DUA model trend dengan tugas berbeda — jangan ditukar:**
+> **Satu model trend — `trend_models`:**
 >
 > | Model | Dipakai di | Input | Kenapa model ini |
 > |---|---|---|---|
-> | `trend_models` — `LinearRegression` atas `time_idx` | **step 13** (rolling forecast, rekonstruksi harga H+1/H+7/H+30) | kurva `{col}_trend` hasil MSTL | Definisi residual pas training ngacu ke kurva trend MSTL. Komponen trend saat inference WAJIB konsisten sama kurva itu — kalau ditukar model lain, input LightGBM bergeser sistematis dan semua prediksi jadi bias. |
-> | `holt_models` — Holt's linear trend / ETS(A,A,N) | **step 11** (proyeksi 2-3 tahun) | log deret terdeseasonalisasi (`trend + residual`) | Outputnya gak pernah jadi input LightGBM, jadi bebas dioptimalkan buat ekstrapolasi jauh. Bobot meluruh eksponensial (ngikutin tren terkini) + interval prediksi analitik. |
+> | `trend_models` — `LinearRegression` atas `time_idx` | **step 12 & 13** (EWS + rekonstruksi harga H+1/H+7/H+30) | kurva `{col}_trend` hasil MSTL | Definisi residual pas training ngacu ke kurva trend MSTL. Komponen trend saat inference WAJIB konsisten sama kurva itu — kalau ditukar model lain, input LightGBM bergeser sistematis dan semua prediksi jadi bias. |
 >
-> Jadi `trend_models[col]` bukan trend langsung dari data, tapi model yang di-fit ke trend hasil MSTL; sementara `holt_models[col]` di-fit ke deret terdeseasonalisasi. Rinciannya di BAB II subbab 2.7.1.
+> Jadi `trend_models[col]` bukan trend langsung dari data, tapi model yang di-fit ke trend hasil MSTL.
+>
+> ⚠️ **Konsekuensi buang Holt (30 Agu 2026):** beban ekstrapolasi sekarang 100% di `LinearRegression`, dan asumsinya keras — tren harga dianggap satu garis lurus untuk seluruh 5 tahun data. Dulu kelemahan ini ditawar Holt (bobot meluruh eksponensial, mengikuti kecenderungan terkini); sekarang tidak ada penawarnya. Dampaknya terbatas karena horizon terjauh cuma 30 hari, **tapi wajib ditulis di keterbatasan BAB IV**: ekstrapolasi tren mengasumsikan laju linear, valid untuk horizon pendek.
 >
 > Kenapa `periods=(7, 365)` dan bukan cuma salah satu: `period=7` doang berisiko nangkep artefak interpolasi (611/2038 ≈ 30% tanggal yang diisi itu polanya fixed tiap akhir pekan/libur, jadi "weekly seasonality" bisa jadi cuma ngukur metode interpolasi kamu sendiri, bukan sinyal pasar asli) — tapi tetap dimasukkan karena pola mingguan survei pasar itu nyata secara struktural. `period=365` nangkep pola musiman tahunan yang jauh lebih substantif secara domain (panen, musim wisata). Dengan MSTL, dua-duanya kepisah eksplisit jadi kolom terpisah, jadi kamu bisa justify dan interpretasi masing-masing secara terpisah di BAB 4.
 >
@@ -110,7 +135,7 @@ from sklearn.linear_model import LinearRegression
 import numpy as np
 
 df['time_idx'] = np.arange(len(df))
-trend_models = {}       # model ekstrapolasi (fit di atas trend MSTL) — dipakai step 11 & 13
+trend_models = {}       # model ekstrapolasi (fit di atas trend MSTL) — dipakai step 12 & 13
 mstl_results = {}        # simpan full MSTL result kalau perlu inspeksi/plot residual
 
 for col in commodity_cols:
@@ -125,57 +150,26 @@ for col in commodity_cols:
     df[f'{col}_residual'] = mstl.resid.values  # ini yang lanjut ke step 5 (feature engineering)
 
     # 2) fit model ekstrapolasi terpisah di atas trend hasil MSTL —
-    #    supaya step 11 & 13 tetap bisa proyeksi ke time_idx masa depan
+    #    supaya step 12 & 13 tetap bisa proyeksi ke time_idx masa depan
     tm = LinearRegression().fit(df[['time_idx']], df[f'{col}_trend'])
     trend_models[col] = tm
 ```
 
-**Fit `holt_models` — dipakai di step 11:**
 
-```python
-import numpy as np
-from statsmodels.tsa.exponential_smoothing.ets import ETSModel
-
-holt_models = {}
-
-for col in commodity_cols:
-    # 1) deret terdeseasonalisasi = observed - seasonal_7 - seasonal_365
-    #    (secara aljabar sama dengan trend + residual, jadi tinggal dijumlah)
-    adj = df[f'{col}_trend'] + df[f'{col}_residual']
-
-    # 2) skala log — biar slope Holt kebaca langsung sebagai laju pertumbuhan
-    z = np.log(adj.clip(lower=1e-6))
-    z.index.freq = 'D'   # wajib, kalau gak statsmodels ngeluh soal index tanpa freq
-
-    # 3) ETSModel(error='add', trend='add', seasonal=None) == Holt's linear trend.
-    #    Pakai ETSModel, BUKAN ExponentialSmoothing, karena cuma yang ini punya
-    #    .get_prediction() -> interval prediksi analitik (dipakai di step 11).
-    holt_models[col] = ETSModel(
-        z, error='add', trend='add', seasonal=None,
-        initialization_method='estimated',
-    ).fit(disp=False)
-```
-
-> **Kenapa input-nya `trend + residual`, bukan `{col}_trend` doang:** kurva trend MSTL udah dimuluskan, sisaannya kecil banget, jadi interval prediksi yang keluar bakal terlalu sempit dan nyesatin. Dengan nyertain residual, keragaman harga yang sebenarnya tetap kehitung dan intervalnya jujur.
->
-> **Kenapa gak langsung ke harga mentah:** Holt gak punya komponen musiman. Kalau dikasih harga mentah, pola mingguan + tahunan lari semua ke sisaan → interval jadi lebar gak wajar. Prosedur bakunya (Hyndman, FPP 3rd ed.) memang: deseasonalize dulu → ramal pakai metode nonmusiman.
-
-**Cara simpen `trend_models`, `holt_models`, dan `mstl_results`:**
+**Cara simpen `trend_models` dan `mstl_results`:**
 
 ```python
 import joblib
 
-joblib.dump(trend_models, 'trend_models.pkl')   # LinearRegression -> step 13
-joblib.dump(holt_models, 'holt_models.pkl')      # ETS(A,A,N)      -> step 11
+joblib.dump(trend_models, 'trend_models.pkl')   # LinearRegression -> step 12 & 13
 joblib.dump(mstl_results, 'mstl_results.pkl')
 
 # cara load lagi nanti (di notebook/script lain, gak perlu re-run MSTL dari awal):
 trend_models = joblib.load('trend_models.pkl')
-holt_models = joblib.load('holt_models.pkl')
 mstl_results = joblib.load('mstl_results.pkl')
 ```
 
-`joblib` lebih disaranin daripada `pickle` bawaan buat nyimpen object sklearn/statsmodels (lebih efisien buat numpy array di dalemnya). `trend_models` dipakai lagi di step 13 (rolling forecast) dan `holt_models` di step 11 (proyeksi 2-3 tahun) — jadi gak perlu re-run MSTL tiap kali butuh nge-predict trend ke depan. `mstl_results` berguna buat lampiran/visualisasi decomposition (trend, seasonal_weekly, seasonal_annual, residual) di BAB 4, dan buat debugging kalau hasil prediksi meleset jauh (bisa dicek ulang komponen mana yang aneh).
+`joblib` lebih disaranin daripada `pickle` bawaan buat nyimpen object sklearn/statsmodels (lebih efisien buat numpy array di dalemnya). `trend_models` dipakai lagi di step 12 (EWS) dan step 13 (rolling forecast) — jadi gak perlu re-run MSTL tiap kali butuh nge-predict trend ke depan. `mstl_results` berguna buat lampiran/visualisasi decomposition (trend, seasonal_weekly, seasonal_annual, residual) di BAB 4, dan buat debugging kalau hasil prediksi meleset jauh (bisa dicek ulang komponen mana yang aneh).
 
 Model final LightGBM (step 8) dan model baseline (step 9) juga sama caranya:
 
@@ -189,6 +183,17 @@ joblib.dump(baseline_models, 'baseline_models.pkl')  # model default + gridsearc
 ## 5. Feature Engineering (di level residual)
 
 > ℹ️ **Catatan:** proposal 1.3 sebenernya eksplisit menyebutkan fitur "penanda periode Ramadan dan hari besar keagamaan" sebagai bagian dari petunjuk model — tapi berdasarkan keputusan kamu, fitur ini **sengaja tidak diimplementasikan** di workflow ini untuk simplifikasi. Kalau nanti ditanya dosen pembimbing kenapa fitur ini gak ada padahal disebut di proposal, siapin jawaban singkat (misal: dianggap sudah cukup terwakili oleh `month_sin`/`month_cos` dan `seasonal_annual` dari MSTL, atau kompleksitas implementasi kalender Hijriah dianggap di luar prioritas utama penelitian).
+
+> ℹ️ **PACF — diagnostik, bukan bagian pipeline (catatan 30 Agu 2026).** Angka lag `[1, 7, 14, 30]` di step ini ditulis langsung, padahal BAB II menyebut PACF sebagai dasarnya. Model berbasis pohon memang **tidak** butuh PACF sebagai syarat teknis — di ARIMA order `p` harfiah dibaca dari PACF, di LightGBM tidak. Jadi PACF tidak masuk arsitektur sistem dan tidak menghasilkan kolom apa pun. Tapi demi konsistensi naskah, pilih salah satu:
+>
+> 1. Jalankan `python webapp/research/pacf_cek.py` sekali — hasilnya jadi tabel + grafik BAB IV. **(disarankan: skripnya sudah jadi, jalannya beberapa detik)**
+> 2. Atau hapus klaim PACF dari BAB II, ganti alasan domain: lag 1 (harian), 7 (mingguan), 14 (dwimingguan), 30 (bulanan).
+
+> 🔓 **Keputusan terbuka — fitur kalender Hijriah.** Catatan di atas menyatakan fitur Ramadan sengaja tidak diimplementasikan. Ini masih bisa ditinjau ulang, dan argumennya kuat: MSTL `period=365` mengunci pola tahunan ke kalender Masehi, sementara Lebaran bergeser hampir 2 bulan penuh sepanjang rentang data (13 Mei 2021 → 20 Mar 2026). Lonjakan itu **tidak** terserap `seasonal_annual`, jadi murni tertinggal di residual — artinya sekarang dia jadi error model.
+>
+> Kalau diambil: `pip install hijridate`, lalu fitur `days_from_idulfitri` (bertanda, di-clip ±60 hari — negatif = menuju Lebaran, positif = pasca), `is_ramadan`, `ramadan_progress`, `hijri_month_sin/cos`. Nilainya **diketahui pasti untuk tanggal masa depan**, jadi harus di-align ke tanggal target (`cal.shift(-h)`), bukan tanggal `t` — ini berlaku juga untuk `day_of_week`/`month_sin`/`month_cos` yang sudah ada. Catatan akurasi: `hijridate` pakai Umm al-Qura (Saudi), tanggal Kemenag bisa beda 1 hari; untuk 6 tanggal Idul Fitri 2021-2026 lebih baik di-hardcode.
+>
+> ⚠️ **Belum diputuskan.** Kalau diambil, GA **wajib** dijalankan ulang karena himpunan fiturnya berubah.
 
 Pakai `feature-engine` (`pip install feature-engine`) — transformer sklearn-style (`fit()`/`transform()`) buat lag & rolling window features. Alasan pindah dari manual pandas: bukan cuma soal konsistensi train/inference (dibahas di step 13), tapi juga manual pandas rawan `PerformanceWarning: DataFrame is highly fragmented` kalau nambahin banyak kolom satu-satu di loop — `feature-engine` nge-handle ini secara internal jadi gak ganggu.
 
@@ -492,113 +497,66 @@ for col in commodity_cols:
 
 ---
 
-## 11. Proyeksi Laju Kenaikan (2-3 Tahun) — Holt's Linear Trend
+## 11. ~~Proyeksi Laju Kenaikan (2-3 Tahun)~~ — DIBATALKAN
 
-> ⚠️ **Ganti dari versi sebelumnya.** Dulu step ini pakai CAGR + ekstrapolasi `trend_models` (`LinearRegression`). Sekarang pakai **Holt's linear trend method**, sesuai BAB II subbab 2.7. Tiga alasannya:
+> 🚫 **Dibatalkan 30 Agustus 2026.** Holt's linear trend / ETS(A,A,N) tidak jadi dipakai. Step ini keluar dari ruang lingkup penelitian. Nomornya sengaja dipertahankan supaya rujukan "step 12"/"step 13" di bagian lain tidak bergeser.
 >
-> 1. **Vs `LinearRegression`:** regresi linear ngasih bobot sama ke semua pengamatan — harga 2021 sama berpengaruhnya dengan harga 2026 dalam nentuin kemiringan proyeksi. Holt bobotnya meluruh eksponensial, jadi arah proyeksi ngikutin kecenderungan terkini. Penting buat harga pangan yang laju kenaikannya sendiri bisa berubah.
-> 2. **Vs CAGR:** CAGR cuma pakai 2 titik (harga awal & harga akhir), jadi rawan banget. Kalau tanggal akhir data kebetulan pas cabai lagi melonjak, laju tahunannya jadi ngawur. Holt pakai seluruh pengamatan pada deret terdeseasonalisasi.
-> 3. **Interval prediksi:** LinearRegression maupun CAGR gak ngasih rentang ketidakpastian dari data, jadi terpaksa ditebak sebagai persentase tetap (dulu `UNCERTAINTY_PCT_PER_YEAR = 0.06`). Holt nurunin intervalnya secara analitik, jadi lebarnya nyerminin gejolak masing-masing komoditas.
-
-> ⚠️ **Holt TIDAK menggantikan `trend_models` di step 4.** Lihat tabel dua model trend di step 4. `trend_models` tetap dipakai di step 13 buat rekonstruksi harga; Holt cuma buat proyeksi jangka panjang. Jangan ditukar — kalau ditukar, definisi residual di step 13 bergeser dan semua prediksi H+1/H+7/H+30 jadi bias.
-
-Dasarnya ada di proposal 1.5 (Manfaat poin 2 — "acuan proyeksi laju kenaikan harga serta rentang ketidakpastian" buat petani/pelaku agribisnis) dan 1.7 (SDG 12 — proyeksi laju kenaikan bantu petani nyusun strategi pola tanam & waktu jual). Model Holt-nya udah di-fit di step 4, di sini tinggal dipakai.
-
-```python
-import numpy as np
-import joblib
-
-holt_models = joblib.load('holt_models.pkl')
-n_tahun_kedepan = 3
-
-for col in commodity_cols:
-    res = holt_models[col]
-    h = 365 * n_tahun_kedepan
-
-    # ramalan + interval prediksi 95% (masih di skala log)
-    pred = res.get_prediction(start=res.nobs, end=res.nobs + h - 1)
-    frame = pred.summary_frame(alpha=0.05)   # kolom: mean, pi_lower, pi_upper
-
-    # balik ke skala harga — hasilnya interval asimetris, dan itu wajar:
-    # lonjakan harga pangan ke atas emang lebih tajam daripada penurunannya
-    harga_proyeksi = np.exp(frame['mean'].iloc[-1])
-    batas_bawah    = np.exp(frame['pi_lower'].iloc[-1])
-    batas_atas     = np.exp(frame['pi_upper'].iloc[-1])
-
-    # laju kenaikan tahunan — INI output utamanya, bukan harga eksaknya.
-    # b = komponen trend Holt di akhir deret (per hari, skala log)
-    b = res.states['trend'].iloc[-1]
-    laju_tahunan = (np.exp(365 * b) - 1) * 100
-
-    # CAGR historis — cuma angka pembanding deskriptif, BUKAN metode proyeksi
-    harga_awal, harga_akhir = df[col].iloc[0], df[col].iloc[-1]
-    n_tahun_historis = (df['tanggal'].iloc[-1] - df['tanggal'].iloc[0]).days / 365
-    cagr = ((harga_akhir / harga_awal) ** (1 / n_tahun_historis) - 1) * 100
-
-    print(f"{col}: laju Holt={laju_tahunan:.2f}%/tahun | CAGR historis={cagr:.2f}%/tahun")
-    print(f"  proyeksi {n_tahun_kedepan} th: {harga_proyeksi:,.0f} "
-          f"(PI95: {batas_bawah:,.0f} - {batas_atas:,.0f})")
-```
-
-**Yang dilaporkan ke user adalah `laju_tahunan`, bukan `harga_proyeksi`.** Proyeksi 1095 langkah ke depan pada data harian itu intervalnya bakal lebar banget — dan itu memang jujur, jangan disembunyiin. Yang berguna buat petani adalah "harga naik sekitar X% per tahun", bukan "harga tanggal sekian dua tahun lagi Rp sekian".
-
-**Perubahan yang perlu di backend** (`webapp/backend/`):
-
-| Berkas | Perubahan |
-|---|---|
-| `pangania/config.py` | Tambah `HOLT_MODELS_PATH = RESEARCH_DIR / "holt_models.pkl"`. Hapus `UNCERTAINTY_PCT_PER_YEAR` (udah gak kepake). |
-| `pangania/ml/artifacts.py` | Tambah `load_holt_models()`, polanya sama kayak `load_trend_models()`. |
-| `pangania/services/projections.py` | Ganti isi `compute_projection()`: pakai `get_prediction().summary_frame()` buat harga + batas, `res.states['trend']` buat laju tahunan. CAGR tetap dihitung tapi turun status jadi angka pembanding. |
-| `pangania/ml/decomposition.py`, `ml/features.py`, `ml/forecaster.py` | **TIDAK disentuh.** |
-
-**Keterbatasan yang wajib disebut di BAB 4:** (i) Holt ngandaikan tren linear di skala log = laju pertumbuhan tetap sepanjang horizon — varian *damped trend* bisa jadi pengembangan lanjutan; (ii) *trend extrapolation drift* — makin jauh dari akhir data training, makin gak andal; (iii) deret terdeseasonalisasi dibentuk pakai komponen musiman hasil dugaan historis, jadi proyeksi ikut ngandaikan pola musiman itu tetap berlaku, padahal siklus tahunannya baru ~5,6; (iv) faktor di luar riwayat harga (kebijakan impor, HET, guncangan iklim baru) gak diperhitungkan.
+> **Yang hilang, supaya kamu sadar konsekuensinya:**
+>
+> - Proyeksi laju kenaikan 2-3 tahun beserta interval prediksi 95% — tidak ada lagi
+> - Klaim di proposal **1.5** (Manfaat poin 2) sudah dihapus; **1.7** (SDG 12) masih perlu diarahkan ulang ke EWS bulanan
+> - `holt_models.pkl` tidak pernah dibuat dan memang tidak perlu
+> - Tabel `projections` + `services/projections.py` di backend jadi yatim
+>
+> **Yang TIDAK ikut dibuang:** MSTL dan `trend_models`. Lihat 0.1 — Holt itu konsumen output MSTL, bukan alasan keberadaannya.
+>
+> **Kalau nanti berubah pikiran** dan ingin proyeksi jangka panjang tanpa menghidupkan Holt: ekstrapolasi `trend_models` yang sudah ada, dan turunkan intervalnya dari standar deviasi residual — bukan dari persentase tebakan seperti `UNCERTAINTY_PCT_PER_YEAR = 0.06` di draft lama. Kualitasnya di bawah Holt (bobot semua tahun dianggap sama), tapi nol tambahan library.
 
 ---
+
 
 ## 12. Early Warning System Bulanan
 
-> ⚠️ **Perbaikan logika:** versi sebelumnya cuma menghitung z-score dari %perubahan harga **aktual** historis — ini murni deteksi anomali statistik, tidak pernah membandingkan **prediksi vs realisasi** padahal itu yang eksplisit dijanjikan di Ringkasan Sistem (0) dan "Alur EWS" versi lama sendiri. Proposal 1.4 juga bilang ambang batas harus **bisa dikonfigurasi pengguna** (bukan hardcode `threshold_z=1.5`).
+> ♻️ **Disederhanakan 30 Agustus 2026.** Versi lama — z-score deviasi prediksi vs realisasi, dengan ambang batas yang bisa dikonfigurasi pengguna — diganti selisih persentase sederhana.
+>
+> **Alasannya:** ambang batas itu **konstanta metodologis yang ditetapkan di awal penelitian**, bukan preferensi pengguna. Kalau admin bisa menggesernya sendiri, hasil EWS tidak reproducible dan justru lemah kalau ditanya penguji.
+>
+> ⚠️ Draft lama file ini menulis *"Proposal 1.4 bilang ambang batas harus bisa dikonfigurasi pengguna"*. Klaim itu **belum diverifikasi** ke BAB I .docx. Kalau proposal memang tidak menuntut itu, klaim tersebut salah — dan sudah dikoreksi di sini.
+
+**Rumusnya — itu saja:**
 
 ```python
-def hitung_ews(df_bulanan, col, model_h30, threshold_z=1.5):
-    # 1) Prediksi H+30 (dari model GA-LightGBM) dikonversi ke skala bulanan
-    df_bulanan[f'{col}_pred_pct_mom'] = df_bulanan[f'{col}_pred_h30'].pct_change() * 100
+def hitung_ews(col):
+    harga_hari_ini = df[col].iloc[-1]
+    harga_30_hari  = prediksi_h30(col)   # WAJIB sudah dalam rupiah, lihat catatan
+    persen = (harga_30_hari - harga_hari_ini) / harga_hari_ini * 100
 
-    # 2) Realisasi aktual bulanan
-    df_bulanan[f'{col}_actual_pct_mom'] = df_bulanan[col].pct_change() * 100
-
-    # 3) Selisih antara realisasi dan prediksi — ini komponen "bandingkan prediksi
-    #    vs realisasi" yang hilang di versi sebelumnya
-    df_bulanan[f'{col}_deviation'] = (
-        df_bulanan[f'{col}_actual_pct_mom'] - df_bulanan[f'{col}_pred_pct_mom']
-    )
-
-    # 4) Ambang batas statistik dari historical mean/std (threshold_z bisa
-    #    di-override lewat parameter fungsi -> user-configurable di UI aplikasi)
-    mean_hist = df_bulanan[f'{col}_actual_pct_mom'].mean()
-    std_hist = df_bulanan[f'{col}_actual_pct_mom'].std()
-    df_bulanan[f'{col}_z_score'] = (df_bulanan[f'{col}_actual_pct_mom'] - mean_hist) / std_hist
-
-    def get_alert_level(z, deviation):
-        if pd.isna(z):
-            return "-"
-        if z > 2:
-            return "Kritis — kenaikan ekstrem"
-        elif z > threshold_z:
-            return "Warning — kenaikan signifikan"
-        elif z > 1:
-            return "Waspada — mulai menyimpang"
-        return "Normal"
-
-    df_bulanan[f'{col}_alert'] = df_bulanan.apply(
-        lambda row: get_alert_level(row[f'{col}_z_score'], row[f'{col}_deviation']), axis=1
-    )
-    return df_bulanan
+    if persen > 10:
+        status = "Warning - kenaikan signifikan"
+    elif persen > 5:
+        status = "Waspada - mulai menyimpang"
+    else:
+        status = "Normal"
+    return persen, status
 ```
 
-**Alur EWS (revisi):** resample data ke bulanan → ambil prediksi H+30 dari model GA-LightGBM (step 8) dan realisasi aktual → hitung deviasi realisasi vs prediksi **dan** z-score dari ambang batas statistik historis (threshold dapat dikonfigurasi pengguna) → trigger alert kalau menyimpang di salah satu/kedua kriteria. Status bersifat indikatif, hanya peringatan visual di aplikasi, tanpa notifikasi (sesuai proposal 1.4).
+> **Satu-satunya langkah yang tidak boleh dilewat:** `prediksi_h30(col)` harus sudah dikembalikan ke **rupiah**. Keluaran mentah LightGBM itu residual (angka ~0,05), bukan harga — kalau lupa, kamu mengurangi 0,05 dari 11.750. Rekonstruksinya `trend + seasonal_weekly + seasonal_annual + residual_pred`, sudah ada di step 13, tinggal dipanggil. Komponen `trend` di tanggal masa depan hanya bisa datang dari `trend_models` (step 4).
+
+**Kenapa versi ini lebih tepat disebut *early warning*:**
+
+| | Versi lama (prediksi vs realisasi) | Versi baru (prediksi vs hari ini) |
+|---|---|---|
+| Arah pandang | Ke belakang — mengevaluasi akurasi model | **Ke depan** — benar-benar peringatan dini |
+| Perlu menyimpan prediksi lama? | Ya (tabel `predictions`) | **Tidak — stateless** |
+| Ambang batas | z-score, configurable | Persentase tetap, ditetapkan di awal |
+| Perlu database? | Ya | **Tidak** |
+
+Versi lama sebenarnya lebih pas disebut *model monitoring*, bukan peringatan dini: dia baru bisa bicara setelah realisasi sebulan berlalu.
+
+Status bersifat indikatif, hanya peringatan visual di aplikasi, tanpa notifikasi (sesuai proposal 1.4).
 
 ---
+
 
 ## 13. Rolling One-Step Forecast (Deployment/Inference)
 
@@ -668,31 +626,52 @@ def rolling_forecast_h1(model_h1, col, df_history, tanggal_baru, harga_aktual_ba
 1.  Load raw data (2.038 baris × 10 kolom, 4 Jan 2021 – 3 Agu 2026)
 2.  Interpolasi missing value (time-based, ISI bukan drop) → tetap 2.038 baris
 3.  ADF test per komoditas
-4.  Detrend via MSTL decomposition (periods=(7, 365): weekly + annual) → fit LinearRegression di atas trend MSTL (buat step 13) DAN Holt/ETS(A,A,N) di atas log deret terdeseasonalisasi (buat step 11) → simpan trend_models + holt_models
+4.  Detrend via MSTL decomposition (periods=(7, 365): weekly + annual) -> fit LinearRegression di atas trend MSTL (buat step 12 & 13) -> simpan trend_models + mstl_results
 5.  Feature engineering di level residual pakai `feature-engine` (LagFeatures/WindowFeatures + cyclical calendar) → simpan feature_transformers
 6.  Setup target per horizon (H+1, H+7, H+30) — direct, bukan recursive
 7.  GA optimasi hyperparameter pakai `pygad` (fitness = 10-Fold CV RMSE + early stopping) — 27 proses pencarian, 11 hyperparameter
 8.  Training model final GA-LightGBM per komoditas × horizon (27 model)
 9.  Training 3 model pembanding: naive, LightGBM default, LightGBM grid/manual search
 10. Evaluasi (MAE/RMSE/R²/MAPE) walk-forward expanding window, 4 model dibandingkan
-11. Proyeksi laju kenaikan 2-3 tahun (Holt's linear trend + interval prediksi 95%, bukan LightGBM; CAGR cuma pembanding)
-12. Early warning system bulanan (prediksi H+30 vs realisasi + threshold z-score, user-configurable)
+11. ~~Proyeksi laju kenaikan 2-3 tahun~~ -- DIBATALKAN (30 Agu 2026), Holt/ETS tidak dipakai
+12. Early warning system bulanan: (prediksi H+30 - harga hari ini) / harga hari ini * 100, ambang tetap, stateless
 13. Rolling one-step forecast untuk deployment (model dipakai ulang tiap ada data aktual baru, tanpa retrain)
 ```
 
+## Lapisan Aplikasi — Catatan Keputusan (30 Agu 2026)
+
+Detail teknisnya di luar scope file ini, tapi tiga keputusan berikut lahir dari perubahan di atas dan perlu dicatat supaya tidak lupa.
+
+**1. EWS versi baru tidak butuh database.** Rumusnya stateless: harga hari ini dari data terakhir, prediksi dari `.pkl`, hitung saat halaman dibuka, selesai. Tidak ada yang perlu diingat dari bulan lalu. Empat tabel jadi tidak terpakai: `predictions`, `ews_alerts`, `ews_settings`, dan `projections` (yatim sejak Holt dibuang).
+
+**2. Streamlit untuk halaman admin — Streamlit sendiri memang tidak butuh database.** Dia framework UI, tanpa penyimpanan apa pun. Yang menciptakan kebutuhan database itu **apa yang dikerjakan** halaman admin, bukan pilihan framework-nya:
+
+| Kebutuhan | Perlu penyimpanan? |
+|---|---|
+| Menampilkan grafik, prediksi, status EWS | Tidak — cukup CSV + `.pkl` |
+| Admin input harga harian baru | **Ya** — hasil input harus bertahan setelah restart |
+| Login admin | **Ya** — Streamlit tidak punya auth bawaan |
+| Riwayat versi & metrik model | Ya |
+
+⚠️ **Jebakan Streamlit:** setiap interaksi menjalankan ulang seluruh script dari atas, dan `st.session_state` hilang saat refresh. Streamlit **tidak bisa** dipakai sebagai tempat penyimpanan.
+
+**3. Database sudah terlanjur ada dan sudah jalan.** `webapp/backend/pangania/db.py` — SQLite + SQLAlchemy, 11 tabel, dan `routers/admin.py` sudah punya 19 endpoint. Membuangnya berarti menulis ulang backend yang sudah berfungsi. Jalan termurah: **Streamlit jadi klien FastAPI**, panggil endpoint yang sudah ada pakai `requests` (pola di `webapp/research/test.py`). Streamlit tidak perlu tahu apa-apa soal database. SQLite sudah lebih dari cukup untuk skala skripsi — tidak perlu Postgres.
+
+---
+
+
 ## Catatan Penting yang Jangan Lupa
 
-- **Jangan** paksa LightGBM prediksi nilai eksak untuk horizon 2-3 tahun — itu tugas Holt (step 11)
-- **Dua model trend, jangan ketuker:** `trend_models` (LinearRegression) HANYA buat step 13 rekonstruksi harga; `holt_models` (ETS(A,A,N)) HANYA buat step 11 proyeksi jangka panjang. Nukar salah satunya bikin residual di step 13 bergeser sistematis
-- **Input Holt = `trend + residual` (deret terdeseasonalisasi) di skala log**, bukan harga mentah (musimannya lari ke sisaan) dan bukan kurva `trend` doang (interval jadi terlalu sempit)
-- **MSTL cuma alat decomposition, bukan forecasting model** — trend hasil MSTL gak bisa diekstrapolasi langsung, wajib fit model tambahan di atasnya (step 4) buat kebutuhan step 11 & 13
+- **Horizon terjauh penelitian ini 30 hari.** Proyeksi 2-3 tahun sudah dibatalkan (step 11) — jangan dihidupkan lagi, dan jangan diganti dengan memaksa LightGBM meramal sejauh itu
+- **Satu model trend saja:** `trend_models` (LinearRegression atas kurva trend MSTL), dipakai step 12 & 13 untuk rekonstruksi harga. Sejak Holt dibuang, asumsi "tren = garis lurus 5 tahun" tidak ada penawarnya — tulis di keterbatasan BAB IV
+- **MSTL cuma alat decomposition, bukan forecasting model** — trend hasil MSTL gak bisa diekstrapolasi langsung, wajib fit model tambahan di atasnya (step 4) buat kebutuhan step 12 & 13
 - **`periods=(7, 365)` dipilih supaya weekly & annual seasonality kepisah eksplisit** — jangan cuma pakai `period=7` doang, karena itu berisiko ngukur artefak interpolasi (611/2038 tanggal kosong yang diisi punya pola fixed tiap akhir pekan), bukan sinyal pasar asli
 - **Cuma ~5,6 siklus tahunan** (2038 baris ÷ 365) buat estimasi seasonal_annual — di bawah rekomendasi ideal, sebutkan sebagai keterbatasan di BAB 4
 - **Jangan** drop baris missing value — proposal eksplisit minta diisi (interpolasi), baris final tetap 2.038
 - **Jangan** pakai mean imputation untuk data bertrend
 - **Jangan lupa** 3 model pembanding (naive, default, grid/manual search) di step 9-10 — dibutuhkan untuk menjawab rumusan masalah #3 dan tujuan #3
-- **Jangan lupa** EWS harus bandingkan prediksi H+30 vs realisasi aktual (step 12), bukan cuma anomali statistik dari data aktual saja
-- K-Fold CV vs Time Series Split **sudah bukan item diskusi terbuka** — proposal sudah menetapkan: K-Fold untuk fitness GA, walk-forward/expanding window untuk evaluasi final
+- **EWS = (prediksi H+30 − harga hari ini) / harga hari ini × 100** dengan ambang tetap (step 12). Bukan z-score, bukan prediksi-vs-realisasi, bukan threshold yang bisa diatur pengguna. Pastikan prediksi H+30 sudah direkonstruksi ke rupiah dulu, bukan residual mentah
+- K-Fold CV vs Time Series Split **sudah bukan item diskusi terbuka** — proposal sudah menetapkan: K-Fold untuk fitness GA, walk-forward/expanding window untuk evaluasi final. Validitasnya bersandar pada Bergmeir, Hyndman & Koo (2018) — rujukan [24] BAB II: K-Fold sah untuk model autoregresif **asal sisaannya tidak berkorelasi serial**. Buktikan dengan `python webapp/research/ljung_box_cek.py`, laporkan sebagai tabel uji prasyarat di BAB IV
 - Model presisi itu **per komoditas × per horizon** = 9 × 3 = **27 model GA-LightGBM**, plus baseline (naive tanpa training, + 2×27 model pembanding lain)
 - **Rolling one-step forecast ≠ recursive forecasting** — lag/rolling features di rolling forecast (step 13) selalu dihitung dari harga **aktual** baru, bukan dari hasil prediksi model sebelumnya. Ini poin yang wajib ditegaskan di BAB 3 supaya reviewer gak salah kira kamu pakai recursive (yang justru dihindari lewat Direct Multi-Horizon di step 6)
 - Di luar scope file ini: 5 fitur aplikasi web (Dashboard Harga, Eksplorasi Data Historis, Pelatihan & Optimasi Model, Prediksi Harga Interaktif, Early Warning System) — perlu workflow terpisah untuk lapisan aplikasi/backend-frontend

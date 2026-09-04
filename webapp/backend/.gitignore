@@ -1,5 +1,0 @@
-data/*.db
-artifacts/models/*.pkl
-artifacts/models/*.json
-__pycache__/
-*.pyc

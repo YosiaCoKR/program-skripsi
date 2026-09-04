@@ -1,0 +1,116 @@
+/* Prediksi Pangan Jogja — tema kustom */
+
+:root {
+    --ppj-primary: #1f8a4c;
+    --ppj-primary-dark: #146134;
+    --ppj-bg-soft: #f4faf6;
+    --ppj-border: #e1e8e4;
+    --ppj-text-muted: #6b7a72;
+}
+
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+    max-width: 1200px;
+}
+
+.ppj-hero {
+    padding: 1.25rem 1.5rem;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--ppj-primary) 0%, var(--ppj-primary-dark) 100%);
+    color: white;
+    margin-bottom: 1.5rem;
+}
+
+.ppj-hero h1 {
+    margin: 0;
+    font-size: 1.6rem;
+}
+
+.ppj-hero p {
+    margin: 0.35rem 0 0;
+    opacity: 0.9;
+    font-size: 0.95rem;
+}
+
+.ppj-card {
+    border: 1px solid var(--ppj-border);
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+    background: white;
+    box-shadow: 0 1px 3px rgba(16, 24, 20, 0.06);
+    height: 100%;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.ppj-card:hover {
+    box-shadow: 0 4px 14px rgba(16, 24, 20, 0.1);
+    transform: translateY(-1px);
+}
+
+.ppj-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+
+.ppj-card-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.ppj-card h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: #1c2b23;
+}
+
+.ppj-card .ppj-price {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--ppj-primary-dark);
+    margin: 0.15rem 0;
+}
+
+.ppj-card .ppj-unit {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--ppj-text-muted);
+}
+
+.ppj-trend-up,
+.ppj-trend-down,
+.ppj-trend-flat {
+    display: inline-block;
+    margin: 0 0 0.35rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.ppj-trend-up {
+    color: #c0392b;
+}
+
+.ppj-trend-down {
+    color: #1f8a4c;
+}
+
+.ppj-trend-flat {
+    color: var(--ppj-text-muted);
+    font-weight: 500;
+}
+
+.ppj-card .ppj-updated {
+    font-size: 0.78rem;
+    color: var(--ppj-text-muted);
+}
+
+.ppj-placeholder {
+    border: 1px dashed var(--ppj-border);
+    border-radius: 14px;
+    padding: 2rem;
+    text-align: center;
+    color: var(--ppj-text-muted);
+    background: var(--ppj-bg-soft);
+}
