@@ -1,7 +1,9 @@
-"""Halaman login Panel Admin — form kata sandi tunggal.
+"""Halaman login Panel Admin — form username + kata sandi dari konfigurasi.
 
-Setelah berhasil masuk, halaman input harga terbaru & pengaturan model
-dibangun pada task tersendiri di balik gerbang `auth.admin_sudah_masuk()`.
+Setelah berhasil masuk, halaman ini jadi hub navigasi ke halaman admin
+lain (Input Harga Terbaru, Pengaturan Model) di balik gerbang
+`auth.admin_sudah_masuk()`. Kedua halaman itu juga baru muncul di sidebar
+setelah login — lihat `app.py`.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ def _form_login() -> None:
         """
         <div class="ppj-hero">
             <h1>🔒 Panel Admin</h1>
-            <p>Masukkan kata sandi admin untuk mengelola harga & model prediksi.</p>
+            <p>Masukkan username &amp; kata sandi admin untuk mengelola harga &amp; model prediksi.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -26,14 +28,15 @@ def _form_login() -> None:
     with kolom_tengah:
         with st.container(border=True):
             with st.form("form-login-admin"):
+                username = st.text_input("Username admin")
                 kata_sandi = st.text_input("Kata sandi admin", type="password")
                 submit = st.form_submit_button("Masuk", width="stretch")
 
             if submit:
-                if login(kata_sandi):
+                if login(username, kata_sandi):
                     st.rerun()
                 else:
-                    st.error("Kata sandi salah. Coba lagi.")
+                    st.error("Username atau kata sandi salah. Coba lagi.")
 
 
 def _tampilan_sudah_masuk() -> None:

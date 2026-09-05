@@ -25,6 +25,13 @@ _WARNA_SUMBU = "rgba(255, 255, 255, 0.18)"
 _WARNA_TEKS_MUTED = "rgba(230, 230, 224, 0.65)"
 _WARNA_TEKS_PRIMER = "rgba(255, 255, 255, 0.95)"
 _CINCIN_PERMUKAAN = "#0d0f0e"
+# Latar chart di-set TETAP gelap (bukan transparan/ikut tema Streamlit) —
+# kalau dibiarkan transparan, chart ini jadi putih kosong tanpa gridline
+# terbaca saat browser/sistem pengguna memakai tema terang (semua warna
+# grid/teks di atas dirancang untuk latar gelap, jadi nyaris tak terlihat
+# di atas latar putih). Dengan latar tetap gelap, chart selalu konsisten
+# terlepas dari preferensi tema perangkat pengguna.
+_WARNA_LATAR = "#12181a"
 
 
 def gambar_grafik_harga(
@@ -121,6 +128,8 @@ def gambar_grafik_harga(
         xaxis_title="Tanggal",
         yaxis_title=f"Harga (Rp/{unit})",
         template="plotly_white",
+        paper_bgcolor=_WARNA_LATAR,
+        plot_bgcolor=_WARNA_LATAR,
         hovermode="x unified",
         showlegend=ada_prediksi,
         legend=dict(

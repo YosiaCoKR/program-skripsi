@@ -10,6 +10,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from auth import admin_sudah_masuk
+
 APP_DIR = Path(__file__).parent
 
 
@@ -51,15 +53,23 @@ def main() -> None:
         title="Panel Admin",
         icon="🔒",
     )
+    # Halaman kerja admin baru muncul di sidebar SETELAH login — sebelum itu,
+    # cuma "Panel Admin" (login) yang terlihat di grup Admin. Ini bukan
+    # pengganti proteksi `auth.require_admin()` di tiap halaman (URL langsung
+    # masih diblokir), cuma supaya navbar terasa benar-benar terpisah antara
+    # publik dan admin yang sudah masuk.
+    visibilitas_admin = "visible" if admin_sudah_masuk() else "hidden"
     admin_input_harga_page = st.Page(
         "views/admin_input_harga.py",
         title="Input Harga Terbaru",
         icon="✏️",
+        visibility=visibilitas_admin,
     )
     admin_model_settings_page = st.Page(
         "views/admin_model_settings.py",
         title="Pengaturan Model",
         icon="⚙️",
+        visibility=visibilitas_admin,
     )
 
     navigation = st.navigation(

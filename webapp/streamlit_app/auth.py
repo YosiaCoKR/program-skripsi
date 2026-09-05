@@ -1,15 +1,16 @@
-"""Gerbang akses admin — satu kata sandi dari konfigurasi aplikasi.
+"""Gerbang akses admin — username + kata sandi dari konfigurasi aplikasi.
 
-Tidak ada tabel `users` maupun akun terdaftar (sesuai PRD): status masuk
-admin cukup disimpan di `st.session_state` untuk sesi tab yang sedang
-berjalan. Setiap login/logout dicatat ke `db.admin_login_logs` (audit
+Tidak ada tabel `users` maupun akun terdaftar (sesuai PRD): username & kata
+sandi disetel sekali lewat environment variable, bukan pendaftaran akun.
+Status masuk admin cukup disimpan di `st.session_state` untuk sesi tab yang
+sedang berjalan. Setiap login/logout dicatat ke `db.admin_login_logs` (audit
 ringan, tanpa identitas selain peran "admin").
 
-Kata sandi dibaca dari environment variable `ADMIN_PASSWORD`. Untuk
-pengembangan lokal, salin `.env.example` jadi `.env` (sudah di-gitignore)
-dan isi nilainya — `load_dotenv()` di bawah memuatnya otomatis tanpa perlu
-export manual di shell. Kalau `.env`/env var tidak ada, dipakai nilai
-default dev supaya halaman tetap bisa dicoba.
+Kredensial dibaca dari environment variable `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
+Untuk pengembangan lokal, salin `.env.example` jadi `.env` (sudah
+di-gitignore) dan isi nilainya — `load_dotenv()` di bawah memuatnya otomatis
+tanpa perlu export manual di shell. Kalau `.env`/env var tidak ada, dipakai
+nilai default dev supaya halaman tetap bisa dicoba.
 """
 
 from __future__ import annotations
@@ -25,9 +26,14 @@ from db import catat_aktivitas_admin
 
 load_dotenv(Path(__file__).parent / ".env")
 
+_ADMIN_USERNAME_DEFAULT = "admin"  # dev/demo — WAJIB diganti via ADMIN_USERNAME di produksi
 _ADMIN_PASSWORD_DEFAULT = "admin123"  # dev/demo — WAJIB diganti via ADMIN_PASSWORD di produksi
 _SESSION_KEY = "admin_masuk"
 _SESI_ID_KEY = "admin_sesi_id"
+
+
+def username_admin() -> str:
+    return os.environ.get("ADMIN_USERNAME", _ADMIN_USERNAME_DEFAULT)
 
 
 def kata_sandi_admin() -> str:
@@ -49,14 +55,15 @@ def _sesi_id() -> str:
     return st.session_state[_SESI_ID_KEY]
 
 
-def login(kata_sandi: str) -> bool:
-    """"Endpoint" login admin — verifikasi kata sandi & aktifkan sesi bila cocok.
+def login(username: str, kata_sandi: str) -> bool:
+    """"Endpoint" login admin — verifikasi username + kata sandi & aktifkan sesi.
 
     Aplikasi ini adalah Streamlit monolith tanpa server API terpisah (sesuai
     arsitektur PRD): "endpoint" di sini adalah fungsi Python yang dipanggil
-    langsung oleh halaman UI, bukan rute HTTP.
+    langsung oleh halaman UI, bukan rute HTTP. Username & kata sandi berasal
+    dari konfigurasi (env var), bukan tabel akun terdaftar.
     """
-    if kata_sandi == kata_sandi_admin():
+    if username == username_admin() and kata_sandi == kata_sandi_admin():
         masuk_sebagai_admin()
         catat_aktivitas_admin("login", _sesi_id())
         return True
