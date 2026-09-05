@@ -39,8 +39,35 @@ def main() -> None:
         title="Data Historis",
         icon="📈",
     )
+    detail_komoditas_page = st.Page(
+        "views/detail_komoditas.py",
+        title="Detail Komoditas",
+        icon="🔍",
+        url_path="detail-komoditas",
+        visibility="hidden",
+    )
+    admin_login_page = st.Page(
+        "views/admin_login.py",
+        title="Panel Admin",
+        icon="🔒",
+    )
+    admin_input_harga_page = st.Page(
+        "views/admin_input_harga.py",
+        title="Input Harga Terbaru",
+        icon="✏️",
+    )
+    admin_model_settings_page = st.Page(
+        "views/admin_model_settings.py",
+        title="Pengaturan Model",
+        icon="⚙️",
+    )
 
-    navigation = st.navigation({"Menu": [dashboard_page, historis_page]})
+    navigation = st.navigation(
+        {
+            "Menu": [dashboard_page, historis_page, detail_komoditas_page],
+            "Admin": [admin_login_page, admin_input_harga_page, admin_model_settings_page],
+        }
+    )
     navigation.run()
 
 

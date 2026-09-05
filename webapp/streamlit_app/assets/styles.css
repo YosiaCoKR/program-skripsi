@@ -40,6 +40,7 @@
     background: white;
     box-shadow: 0 1px 3px rgba(16, 24, 20, 0.06);
     height: 100%;
+    margin-bottom: 0.6rem;
     transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
@@ -104,6 +105,68 @@
 .ppj-card .ppj-updated {
     font-size: 0.78rem;
     color: var(--ppj-text-muted);
+}
+
+.ppj-hero-detail {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+}
+
+.ppj-hero-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.ppj-hero-detail-icon {
+    font-size: 2rem;
+    line-height: 1;
+}
+
+.ppj-hero-detail-price {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.ppj-hero-price-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+
+.ppj-hero-unit,
+.ppj-hero-updated {
+    font-size: 0.85rem;
+    opacity: 0.85;
+}
+
+.ppj-hero-trend-up,
+.ppj-hero-trend-down,
+.ppj-hero-trend-flat {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.ppj-hero-trend-up {
+    background: rgba(220, 53, 69, 0.85);
+    color: white;
+}
+
+.ppj-hero-trend-down {
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--ppj-primary-dark);
+}
+
+.ppj-hero-trend-flat {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
 }
 
 .ppj-placeholder {

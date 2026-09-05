@@ -2,39 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import streamlit as st
 
 from data.mock_commodities import get_kategori_list
 from data.mock_prices import KartuHarga, get_dashboard_cards
-from views.detail_komoditas import tampilkan_detail
+from formatting import format_rupiah, format_waktu_pembaruan, tren_status
 
-
-def format_waktu_pembaruan(diperbarui_pada: datetime) -> str:
-    """Format waktu update jadi relatif ("3 jam lalu") kalau masih hari ini."""
-    selisih_jam = (datetime.now() - diperbarui_pada).total_seconds() / 3600
-    if selisih_jam < 1:
-        return "Diperbarui baru saja"
-    if selisih_jam < 24:
-        return f"Diperbarui {int(selisih_jam)} jam lalu"
-    return f"Diperbarui {diperbarui_pada.strftime('%d %b %Y, %H:%M')}"
+_KELAS_TREN_KARTU = {"naik": "ppj-trend-up", "turun": "ppj-trend-down", "tetap": "ppj-trend-flat"}
 
 
 def _tren_harian(kartu: KartuHarga) -> tuple[str, str]:
     """(kelas_css, label) panah naik/turun/tetap dibanding harga kemarin."""
-    selisih = kartu.harga_terbaru - kartu.harga_kemarin
-    if selisih > 0:
-        persen = selisih / kartu.harga_kemarin * 100
-        return "ppj-trend-up", f"▲ {persen:.1f}%"
-    if selisih < 0:
-        persen = abs(selisih) / kartu.harga_kemarin * 100
-        return "ppj-trend-down", f"▼ {persen:.1f}%"
-    return "ppj-trend-flat", "— tetap"
+    status, label = tren_status(kartu.harga_terbaru, kartu.harga_kemarin)
+    return _KELAS_TREN_KARTU[status], label
 
 
 def _gambar_kartu(kartu: KartuHarga) -> None:
-    harga_format = f"{kartu.harga_terbaru:,.0f}".replace(",", ".")
+    harga_format = format_rupiah(kartu.harga_terbaru)
     kelas_tren, label_tren = _tren_harian(kartu)
     st.markdown(
         f"""
@@ -52,7 +36,7 @@ def _gambar_kartu(kartu: KartuHarga) -> None:
     )
     if st.button("Lihat Detail", key=f"detail-{kartu.komoditas.slug}", width="stretch"):
         st.session_state["komoditas_dipilih"] = kartu.komoditas.slug
-        st.rerun()
+        st.switch_page("views/detail_komoditas.py")
 
 
 def tampilkan_grid_dashboard() -> None:
@@ -84,8 +68,4 @@ def tampilkan_grid_dashboard() -> None:
         st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
 
 
-komoditas_dipilih = st.session_state.get("komoditas_dipilih")
-if komoditas_dipilih:
-    tampilkan_detail(komoditas_dipilih)
-else:
-    tampilkan_grid_dashboard()
+tampilkan_grid_dashboard()

@@ -61,6 +61,17 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Log SQLite ringan aplikasi Streamlit (login admin, prediksi anonim) — runtime, bukan kode
+webapp/streamlit_app/tracking.db
+webapp/streamlit_app/tracking.db-journal
+
+# Konfigurasi aplikasi yang diubah admin lewat panel (mis. model aktif) — runtime, bukan kode
+webapp/streamlit_app/config.json
+webapp/streamlit_app/config.json.tmp
+
+# Hasil input harga admin (persisten via task backend) — data runtime, bukan kode
+webapp/streamlit_app/data/harga_historis.pkl
+
 # Flask stuff:
 instance/
 .webassets-cache
