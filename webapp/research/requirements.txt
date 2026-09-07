@@ -1,0 +1,13 @@
+pandas
+numpy
+matplotlib
+seaborn
+plotly
+missingno
+scikit-learn
+statsmodels
+feature_engine
+skforecast
+lightgbm
+pygad
+joblib

@@ -21,6 +21,7 @@ program-skripsi/
 │   │   ├── code.ipynb           # eksplorasi data dan pemodelan
 │   │   ├── code_backup.ipynb    # backup notebook
 │   │   ├── DATASET-BERAS.csv    # data harga harian komoditas
+│   │   ├── requirements.txt     # dependency Python untuk riset
 │   │   └── models/              # artefak model hasil riset
 │   └── streamlit_app/
 │       ├── app.py               # entry point aplikasi
@@ -76,6 +77,14 @@ Setelah itu buka URL yang ditampilkan oleh Streamlit, biasanya:
 
 ```text
 http://localhost:8501
+```
+
+## Menjalankan notebook riset
+
+```bash
+cd webapp/research
+python -m pip install -r requirements.txt
+jupyter notebook code.ipynb
 ```
 
 ## Kredensial admin default untuk pengembangan
