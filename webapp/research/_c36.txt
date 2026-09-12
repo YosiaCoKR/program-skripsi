@@ -1,0 +1,57 @@
+df_cleaned["time_index"] = np.arange(len(df_cleaned))
+trend_model = {}
+seasonal_model = {}
+decomp_by_col = {}
+residual_splits = {}
+
+paras_mstl = {
+    "periods": [7, 365],
+    "stl_kwargs": {"robust": True},
+}
+holdout = TimeSeriesSplit(n_splits=2, test_size=60)
+
+
+def holdout_split_series(y):
+    train_idx, test_idx = list(holdout.split(y))[-1]
+    return y.iloc[train_idx], y.iloc[test_idx]
+
+
+def fit_train_decomposition(price_train):
+    mstl = MSTL(price_train, **paras_mstl).fit()
+    residual_train = pd.Series(
+        mstl.resid.values, index=price_train.index, name=price_train.name
+    )
+    trend_forecaster = TrendForecaster(regressor=LinearRegression())
+    trend_forecaster.fit(
+        pd.Series(mstl.trend.values, index=pd.RangeIndex(len(mstl.trend)))
+    )
+    return mstl, trend_forecaster, residual_train
+
+
+def tile_last_cycle(values, period, n_steps):
+    cycle = np.asarray(values, dtype=float)[-period:]
+    reps = int(np.ceil(n_steps / period))
+    return np.tile(cycle, reps)[:n_steps]
+
+
+def reconstruct_harga_test(trend_forecaster, mstl, residual_pred, n_steps):
+    residual_pred = np.asarray(residual_pred, dtype=float).ravel()[:n_steps]
+    trend_pred = np.asarray(
+        trend_forecaster.predict(fh=np.arange(1, n_steps + 1))
+    ).ravel()[:n_steps]
+    seasonal_weekly = tile_last_cycle(mstl.seasonal["seasonal_7"].values, 7, n_steps)
+    seasonal_yearly = tile_last_cycle(mstl.seasonal["seasonal_365"].values, 365, n_steps)
+    return trend_pred + seasonal_weekly + seasonal_yearly + residual_pred
+
+for col in comodity_cols:
+    mstl = MSTL(price_train, **paras_mstl).fit()
+    seasonal_model[col] = mstl
+
+    df_cleaned[f"{col}_trend"] = mstl.trend.values
+    df_cleaned[f"{col}_seasonal_weekly"] = mstl.seasonal["seasonal_7"].values
+    df_cleaned[f"{col}_seasonal_yearly"] = mstl.seasonal["seasonal_365"].values
+    df_cleaned[f"{col}_residual"] = mstl.resid.values
+
+    trend_forecast = TrendForecaster(regressor=LinearRegression())
+    trend_forecast.fit(df_cleaned[col].values)
+    trend_model[col] = trend_forecast

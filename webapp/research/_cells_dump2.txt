@@ -1,0 +1,37 @@
+================================================================================
+CELL 34
+## 5. Detrending dan Deseasonalization dengan Dekomposisi MSTL
+
+MSTL pecah harga jadi trend, musiman (7 & 365 hari), dan residual. Model jalan di residual.
+
+================================================================================
+CELL 35
+### 5.1 Mendekomposisi Trend, Seasonal, dan Residual Setiap Komoditas
+
+MSTL robust per komoditas; trend diaproksimasi regresi linier supaya bisa diekstrapolasi.
+
+================================================================================
+CELL 37
+### 5.1.1 Memeriksa Struktur `df_cleaned` Setelah Dekomposisi
+
+Cek kolom baru: trend, seasonal, residual.
+
+================================================================================
+CELL 38
+df_cleaned.info()
+================================================================================
+CELL 39
+### 5.2 Menyimpan Model Trend dan Hasil MSTL
+
+Simpan trend dan MSTL ke `.pkl` supaya tidak dekomposisi ulang.
+
+================================================================================
+CELL 40
+jl.dump(trend_model, "models/trend_model.pkl")
+jl.dump(seasonal_model, "models/seasonal_model.pkl")
+================================================================================
+CELL 44
+### 6.2 Melatih ForecasterDirect per Komoditas dan Horizon
+
+`fit` residual untuk tiap komoditas pada horizon 1, 7, dan 30 hari.
+

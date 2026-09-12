@@ -1,0 +1,250 @@
+================================================================================
+CELL 34 markdown
+## 5. Detrending dan Deseasonalization dengan Dekomposisi MSTL
+
+MSTL pecah harga jadi trend, musiman (7 & 365 hari), dan residual. Model jalan di residual.
+
+================================================================================
+CELL 36 code
+df_cleaned["time_index"] = np.arange(len(df_cleaned))
+trend_model = {}
+seasonal_model = {}
+
+paras_mstl = {
+    "periods": [7, 365],
+    "stl_kwargs": {"robust": True},
+}
+
+for col in comodity_cols:
+    mstl = MSTL(df_cleaned[col], **paras_mstl).fit()
+    seasonal_model[col] = mstl
+
+    df_cleaned[f"{col}_trend"] = mstl.trend.values
+    df_cleaned[f"{col}_seasonal_weekly"] = mstl.seasonal["seasonal_7"].values
+    df_cleaned[f"{col}_seasonal_yearly"] = mstl.seasonal["seasonal_365"].values
+    df_cleaned[f"{col}_residual"] = mstl.resid.values
+
+    trend_forecast = TrendForecaster(regressor=LinearRegression())
+    trend_forecast.fit(df_cleaned[col].values)
+    trend_model[col] = trend_forecast
+================================================================================
+CELL 44 markdown
+### 6.2 Melatih ForecasterDirect per Komoditas dan Horizon
+
+`fit` residual untuk tiap komoditas pada horizon 1, 7, dan 30 hari.
+
+================================================================================
+CELL 45 code
+horizons = [1, 7, 30]
+forecasters_default = {}
+
+for col in comodity_cols:
+    forecasters_default[col] = {}
+    for h in horizons:
+        forecaster_default = ForecasterDirect(
+            estimator=lgb.LGBMRegressor(force_col_wise=True),
+            lags=[1, 7, 30],
+            steps=h,
+            window_features=window_features,
+            calendar_features=calendar_features,
+        )
+        forecaster_default.fit(y=df_cleaned[f"{col}_residual"])
+        forecasters_default[col][h] = forecaster_default
+
+================================================================================
+CELL 49 code
+best_params_for_GA = {}
+forecasters_ga = {}
+residual_splits = {}
+
+holdout = TimeSeriesSplit(n_splits=2, test_size=60)
+
+for col in comodity_cols:
+    residual_all = df_cleaned[f"{col}_residual"]
+    train_idx, test_idx = list(holdout.split(residual_all))[-1]
+    residual_train = residual_all.iloc[train_idx]
+    residual_test = residual_all.iloc[test_idx]
+    residual_splits[col] = {"train": residual_train, "test": residual_test}
+
+    print(
+        f"{col}: train {residual_train.index.min().date()} → {residual_train.index.max().date()} | test dikunci {residual_test.index.min().date()} → {residual_test.index.max().date()}"
+    )
+
+    best_params_for_GA[col] = {}
+    forecasters_ga[col] = {}
+
+    for h in horizons:
+        best_solution, best_solution_fitness, best_solution_idx = running_for_ga(
+            y=residual_train,
+            steps=h,
+            window_features=window_features,
+            calendar_features=calendar_features,
+        )
+
+        params = {
+            "num_leaves": int(best_solution[0]),
+            "learning_rate": best_solution[1],
+            "max_depth": int(best_solution[2]),
+            "n_estimators": int(best_solution[3]),
+            "min_child_samples": int(best_solution[4]),
+            "subsample": best_solution[5],
+            "colsample_bytree": best_solution[6],
+            "min_child_weight": best_solution[7],
+            "reg_alpha": best_solution[8],
+            "reg_lambda": best_solution[9],
+            "min_split_gain": best_solution[10],
+            "bagging_freq": 1,
+            "verbosity": -1,
+        }
+
+        best_params_for_GA[col][h] = {
+            "params": params,
+            "fitness": best_solution_fitness,
+            "solution_index": best_solution_idx,
+        }
+
+        forecaster_ga = ForecasterDirect(
+            estimator=lgb.LGBMRegressor(**params),
+            steps=h,
+            lags=[1, 7, 30],
+            window_features=window_features,
+            calendar_features=calendar_features,
+        )
+        forecaster_ga.fit(y=residual_train)
+        forecasters_ga[col][h] = forecaster_ga
+        save_forecaster(forecasters_ga, f"forecast_ga/forecasters_ga_{col}_h{h}.pkl")
+
+================================================================================
+CELL 54 markdown
+## 8. Evaluasi pada Data Test
+
+Alur dipecah: bagi train/test, latih, prediksi residual, lalu rekonstruksi ke harga. Metrik hanya MAE, RMSE, dan MAPE. Setelah contoh satu komoditas, semua komoditas dinilai ketika prediksi residual sudah digabung jadi harga.
+
+================================================================================
+CELL 55 markdown
+### 8.1 Membagi Residual Menjadi Train dan Test
+
+30 baris terakhir jadi test, sisanya train. Fold terakhir `TimeSeriesSplit(n_splits=2, test_size=30)`.
+
+================================================================================
+CELL 56 code
+holdout = TimeSeriesSplit(n_splits=2, test_size=60)
+
+for col in comodity_cols:
+    y = df_cleaned[f"{col}_residual"]
+    train_idx, test_idx = list(holdout.split(y))[-1]
+    y_train = y.iloc[train_idx]
+    y_test = y.iloc[test_idx]
+    print(
+        f"{col}: train {y_train.index.min().date()} -> {y_train.index.max().date()} | "
+        f"test {y_test.index.min().date()} -> {y_test.index.max().date()}"
+    )
+
+================================================================================
+CELL 57 markdown
+    ### 8.2 Melatih ForecasterDirect pada Residual Train
+
+`ForecasterDirect` memakai hyperparameter GA, lalu di-`fit` hanya pada `y_train` (contoh: komoditas terakhir di loop, horizon 7).
+
+================================================================================
+CELL 58 code
+forecaster_eval = ForecasterDirect(
+    estimator=lgb.LGBMRegressor(**best_params_for_GA[col][h]["params"]),
+    steps=h,
+    lags=[1, 7, 30],
+    window_features=window_features,
+    calendar_features=calendar_features,
+)
+
+forecaster_eval.fit(y_train)
+
+================================================================================
+CELL 59 markdown
+### 8.3 Prediksi Residual pada Data Test
+
+Prediksi residual `h` hari ke depan dari ujung data train.
+
+================================================================================
+CELL 60 code
+prediction = forecaster_eval.predict(steps=h)
+y_test_h = y_test.iloc[:h]
+prediction
+
+================================================================================
+CELL 61 markdown
+### 8.4 Rekonstruksi ke Skala Harga (MAE, RMSE, MAPE)
+
+Residual prediksi digabung jadi satu harga: `harga_pred = trend + seasonal_mingguan + seasonal_tahunan + residual_pred`. Komponen MSTL diambil di tanggal test yang sama. Metrik hanya MAE, RMSE, MAPE.
+
+================================================================================
+CELL 62 code
+test_index_h = y_test_h.index
+residual_pred = np.asarray(prediction).ravel()
+
+trend_h = df_cleaned.loc[test_index_h, f"{col}_trend"]
+seasonal_weekly_h = df_cleaned.loc[test_index_h, f"{col}_seasonal_weekly"]
+seasonal_yearly_h = df_cleaned.loc[test_index_h, f"{col}_seasonal_yearly"]
+
+harga_aktual = df_cleaned.loc[test_index_h, col]
+harga_pred = (
+    trend_h.to_numpy()
+    + seasonal_weekly_h.to_numpy()
+    + seasonal_yearly_h.to_numpy()
+    + residual_pred
+)
+================================================================================
+CELL 63 markdown
+### 8.5 Prediksi Semua Komoditas (Data Sudah Jadi Satu)
+
+Pipeline 8.1–8.4 diulang untuk semua komoditas dan horizon. Residual prediksi langsung digabung ke harga, lalu MAE / RMSE / MAPE.
+
+================================================================================
+CELL 64 code
+holdout = TimeSeriesSplit(n_splits=2, test_size=60)
+forecasters_eval = {}
+eval_rows = []
+
+for col in comodity_cols:
+    residual_all = df_cleaned[f"{col}_residual"]
+    train_idx, test_idx = list(holdout.split(residual_all))[-1]
+    y_train = residual_all.iloc[train_idx]
+    y_test = residual_all.iloc[test_idx]
+    forecasters_eval[col] = {}
+
+    for h in horizons:
+        forecaster_eval = ForecasterDirect(
+            estimator=lgb.LGBMRegressor(**best_params_for_GA[col][h]["params"]),
+            steps=h,
+            lags=[1, 7, 30],
+            window_features=window_features,
+            calendar_features=calendar_features,
+        )
+        forecaster_eval.fit(y=y_train)
+        forecasters_eval[col][h] = forecaster_eval
+
+        residual_pred = np.asarray(forecaster_eval.predict(steps=h)).ravel()[:h]
+        idx = y_test.index[:h]
+        harga_aktual = df_cleaned.loc[idx, col].to_numpy()
+        harga_pred = (
+            df_cleaned.loc[idx, f"{col}_trend"].to_numpy()
+            + df_cleaned.loc[idx, f"{col}_seasonal_weekly"].to_numpy()
+            + df_cleaned.loc[idx, f"{col}_seasonal_yearly"].to_numpy()
+            + residual_pred
+        )
+
+        eval_rows.append(
+            {
+                "Komoditas": col,
+                "Horizon": h,
+                "MAE": mean_absolute_error(harga_aktual, harga_pred),
+                "RMSE": root_mean_squared_error(harga_aktual, harga_pred),
+                "MAPE (%)": mean_absolute_percentage_error(harga_aktual, harga_pred)
+                * 100,
+            }
+        )
+
+df_eval = pd.DataFrame(eval_rows)
+pd.set_option("display.max_rows", 50)
+pd.set_option("display.float_format", lambda x: f"{x:,.4f}")
+df_eval
+

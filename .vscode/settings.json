@@ -1,4 +1,4 @@
 {
-  "python.languageServer": "Default",
+  "python.languageServer": "None",
   "editor.inlineSuggest.enabled": true
 }
